@@ -3,4 +3,6 @@
   :url "http://datomic.com"
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
-  :dependencies [[org.clojure/clojure "1.4.0"]])
+  :main datomic.codeq.core
+  :dependencies [[com.datomic/datomic-free "0.8.3538"]
+                 [org.clojure/clojure "1.4.0"]])
