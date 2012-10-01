@@ -1,0 +1,76 @@
+Codeq
+* Objective
+** Lots of interesting information exists in the source history of a project
+** Get it into a db so it's queryable
+*** must include time (use Datomic)
+** Move from source file orientation to language-level definition orientation
+* Premise
+** Presumptions
+*** Using a VCS
+**** with single total order available
+*** Using a lang with globally unique namespaced definitions
+**** e.g. Clojure, Java etc
+** turn VCS commits into Datomic transactions
+*** with 1:1 monotonicity - must import in order
+*** Commit properties become tx attrs
+*** Analyze affected sources
+**** grab docs and other metadata
+**** track definitions (e.g. in Clojure, defns)
+***** def is namespaced name associated with source (data or code)
+****** different source is different def for same name
+**** other analysis-derived info
+***** call sites (use of other fns)
+***** use of lang constructs (EH, mutation etc)?
+* VCS
+** need monotonic log
+** ability to list affected files
+** ability to get file contents
+*** a la carte blob/file vs pulling revision?
+** Git, defactor standard, has good temporal aspect, blobs
+*** but not moreso than mercurial etc, so don't close doors
+* Datomic
+** code entities
+*** named by namespaced names
+**** name might not be enough
+***** e.g. if overloads have location-distinct defs
+***** what type is name then?
+****** or name is not unique
+******* that's what overloading means
+*** point to definition
+**** name -> def
+**** name -> overloads -> defs
+** definition
+*** identified by source equality
+**** preferably code-data or AST, vs strings
+**** for Clojure, must be metadata-sensitive compare
+*** occurs at location in file
+**** over time, same def might move around within/across files
+*** source-derived metadata
+**** docs
+**** arglist(s)
+**** langs with overloads might consider separate defs
+***** e.g. may have separate docs
+**** also have calls per arity/sig
+***** could handle locations separately, even though nested
+*** non fn/method defs
+**** e.g. classes, types etc
+*** def is totality of source associated with name
+**** can't be if not file-contiguous
+***** else name+sig?
+*** analysis-derived info
+**** callsites
+***** vars called
+****** or methods?
+******* if statically determinable
+* Issues
+** Multi-language support?
+*** multiple langs good, same schema not so good
+**** don't try to normalize across langs
+** Clojure lang support
+*** multimethods
+**** impls have separate locations, calls etc
+**** but same names
+*** protocols
+**** independent fn defs
+**** defs in deftype/record
+*** deftype/record
