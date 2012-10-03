@@ -22,8 +22,133 @@
       .getInputStream 
       io/reader))
 
-(defn install-schema [conn]
-  )
+(def schema
+     [
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/commit
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Associate tx with this git commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/op
+       :db/valueType :db.type/keyword
+       :db/index true
+       :db/cardinality :db.cardinality/one
+       :db/doc "Associate tx with this operation - one of :import, :analyze"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/type
+       :db/valueType :db.type/keyword
+       :db/cardinality :db.cardinality/one
+       :db/index true
+       :db/doc "Type enum for git objects - one of :commit, :tree, :blob, :tag"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/sha
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "A git sha, should be in repo"
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/parents
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/many
+       :db/doc "Parents of a commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/deletes
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/many
+       :db/doc "Git objects (trees/blobs) deleted by a commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/message
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "A commit message"
+       :db/fulltext true
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/author
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Person who authored a commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/authoredAt
+       :db/valueType :db.type/instant
+       :db/cardinality :db.cardinality/one
+       :db/doc "Timestamp of authorship of commit"
+       :db/index true
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/committer
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Person who committed a commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/committedAt
+       :db/valueType :db.type/instant
+       :db/cardinality :db.cardinality/one
+       :db/doc "Timestamp of commit"
+       :db/index true
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/nodes
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/many
+       :db/doc "Nodes of a git tree"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/path
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "Path of a tree node"
+       :db/index true
+       :db/fulltext true
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/object
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Git object (tree/blob) in a tree node"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/prior
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Node containing prior value of a git object"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :person/email
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "An email address"
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
+      ])
+
+(defn ensure-schema [conn]
+  (or (-> conn d/db (d/entid :git/commit))
+      @(d/transact conn schema)))
 
 ;;example commit - git cat-file -p
 ;;tree d81cd432f2050c84a3d742caa35ccb8298d51e9d
@@ -67,15 +192,13 @@
 ;;:040000 040000 f1858d625337a7b43e3c99b1b6c1c1ed61a3f535 b7f7aa245f7de94f7716e8ed3e462d5865777246 M	tix
 ;;:100644 100644 f3def8b510500009953879f2d89d93f554e86e67 5f9b77505a97f690ff12b3c18b0b871b09725b85 M	tix/datomic-free.org
 
-(defn dir 
+(defn dir
+  "Returns [[sha path] ...]"
   [tree]
   (with-open [s (exec-stream (str "git cat-file -p " tree))]
-    (let [es
-          (map
-           ;;this will break when paths/files have spaces, should split on tab first
-           #(vec (string/split ^String % #"\s"))
-           (line-seq s))]
-      (mapv #(nth % 2) es))))
+    (let [es (line-seq s)]
+      (mapv #(vector (nth (string/split ^String % #"\s") 2)
+                     (subs % (inc (.indexOf ^String % "\t")) (count %))) es))))
 
 (defn changes [tree]
   (with-open [s (exec-stream (str "git diff-tree -r -c -M -C -t --no-commit-id --root " tree))]
@@ -85,24 +208,24 @@
              mode2 (subs e 8 14)
              sha1 (subs e 15 55)
              sha2 (subs e 56 96)
+             prior-sha (when (not= sha1 "0000000000000000000000000000000000000000") sha1)
              sha (when (not= sha2 "0000000000000000000000000000000000000000") sha2)
              op (subs e 97 98)
              path (subs e (inc (.lastIndexOf e "\t")) (count e))]
          (into {}
                (remove (fn [[_ v]] (nil? v))
-                       {:prev (when (and
-                                     (not= op "T")
-                                     (not= sha1 "0000000000000000000000000000000000000000"))
-                                sha1)
+                       {:prior-sha (when (not= op "T") prior-sha)
                         :sha sha
                         :op ({"A" :add "M" :modify "D" :delete "C" :copy "R" :rename "T" :type-change} op)
                         :path path
+                        :prior-path (cond (= op "D") path
+                                          (= op "R") (subs e (inc (.indexOf e "\t")) (.lastIndexOf e "\t")))
                         :dir (when (and sha (= mode2 "040000")) (dir sha))
                         }))))
      (line-seq s))))
 
 (defn commit
-  [sha doc]
+  [[sha msg]]
   (let [trim-email (fn [s] (subs s 1 (dec (count s))))
         dt (fn [ds] (Date. (* 1000 (Integer/parseInt ds))))
         [tree parents author committer]
@@ -115,7 +238,7 @@
              (vec (reverse (first xs)))
              (vec (reverse (second xs)))]))]
     {:sha sha
-     :doc doc
+     :msg msg
      :tree tree
      :dir (dir tree)
      :parents parents
@@ -125,31 +248,66 @@
      :committer (trim-email (committer 2))
      :committed (dt (committer 1))}))
 
-(defn commits []
-  (let [commits (with-open [s (exec-stream "git log --pretty=oneline")]
+(defn index-get-id
+  [db attr v]
+  (let [d (first (d/index-range db attr v))]
+    (when (and d (= (:v d) v))
+      (:e d)))
+  #_(ffirst (d/q '[:find ?e :in $ ?a ?v :where [?e ?a ?v]]
+                 db attr v)))
+
+(defn index->id-fn
+  [db attr]
+  (memoize
+   (fn [x]
+     (or (index-get-id db attr x)
+         (d/tempid :db.part/user)))))
+
+(defn commit-tx-data
+  [db commit]
+  (let [tempid? map? ;;todo - better
+        sha->id (index->id-fn db :git/sha)
+        email->id (index->id-fn db :person/emailcz)
+        ]))
+
+(defn commits
+  "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
+  or any acceptable commit name arg for git log"
+  [commit-name]
+  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline " commit-name))]
                   (reverse
                    (mapv
-                    #(commit (subs % 0 40)
+                    #(vector (subs % 0 40)
                              (subs % 41 (count %)))
                     (line-seq s))))] 
     commits))
 
+(defn unimported-commits
+  [db commit-name]
+  (let [imported (into {}
+                       (d/q '[:find ?sha ?e
+                              :where
+                              [?tx :codeq/op :import]
+                              [?tx :git/commit ?e]
+                              [?e :git/sha ?sha]]
+                            db))]
+    (pmap commit (remove (fn [[sha _]] (imported sha)) (commits commit-name)))))
+
+
 (defn ensure-db [db-uri]
   (let [newdb? (d/create-database db-uri)
         conn (d/connect db-uri)]
-    (when newdb?
-      (install-schema conn))
+    (ensure-schema conn)
     conn))
 
 (defn -main
-  [& [db-uri]]
+  [& [db-uri commit]]
   (if db-uri
-    (do 
-      (ensure-db db-uri) 
-      (commits))
-    (println "Usage: datomic.codeq.core db-uri")))
+    (let [conn (ensure-db db-uri)] 
+      (unimported-commits (d/db conn) commit))
+    (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
 
 (comment
-(datomic.codeq.core/-main "datomic:mem://test")
+(datomic.codeq.core/-main "datomic:mem://test" "20f8db11804afc8c5a1752257d5fdfcc2d131d08")
 )
