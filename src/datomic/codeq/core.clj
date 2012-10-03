@@ -108,12 +108,10 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/path
-       :db/valueType :db.type/string
+       :db/ident :git/filename
+       :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
-       :db/doc "Path of a tree node"
-       :db/index true
-       :db/fulltext true
+       :db/doc "filename of a tree node"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
@@ -135,6 +133,15 @@
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one
        :db/doc "An email address"
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :file/name
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "A filename"
+       :db/fulltext true
        :db/unique :db.unique/identity
        :db.install/_attribute :db.part/db}
       ])
@@ -174,7 +181,7 @@
 ;;040000 tree 407924e4812c72c880b011b5a1e0b9cb4eb68cfa	test
 
 (defn dir
-  "Returns [[sha :type path] ...]"
+  "Returns [[sha :type filename] ...]"
   [tree]
   (with-open [s (exec-stream (str "git cat-file -p " tree))]
     (let [es (line-seq s)]
@@ -233,18 +240,22 @@
   (let [tempid? map? ;;todo - better pred
         sha->id (index->id-fn db :git/sha)
         email->id (index->id-fn db :email/address)
+        filename->id (index->id-fn db :file/name)
         authorid (email->id author)
         committerid (email->id committer)
         cid (d/tempid :db.part/user)
-        tx-data (fn f [[sha type path]]
+        tx-data (fn f [[sha type filename]]
                   (let [id (sha->id sha)
+                        filenameid (filename->id filename)
                         nodeid (or (and (not (tempid? id))
-                                        (ffirst (d/q '[:find ?e :in $ ?path ?id
-                                                       :where [?e :git/path ?path] [?e :git/object ?id]]
-                                                     db path id)))
+                                        (not (tempid? filenameid))
+                                        (ffirst (d/q '[:find ?e :in $ ?filename ?id
+                                                       :where [?e :git/filename ?filename] [?e :git/object ?id]]
+                                                     db filenameid id)))
                                    (d/tempid :db.part/user))
                         data (cond-> []
-                                     (tempid? nodeid) (conj {:db/id nodeid :git/path path :git/object id})
+                                     (tempid? filenameid) (conj [:db/add filenameid :file/name filename])
+                                     (tempid? nodeid) (conj {:db/id nodeid :git/filename filenameid :git/object id})
                                      (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
                         data (if (and (tempid? id) (= type :tree))
                                (let [es (dir sha)]
@@ -316,25 +327,32 @@
   [conn commits]
   (doseq [commit commits]
     (let [db (d/db conn)]
-      (prn (:sha commit))
-      (d/transact conn (commit-tx-data db commit)))))
+      (println "Importing commit:" (:sha commit))
+      (d/transact conn (commit-tx-data db commit))))
+  (d/request-index conn)
+  (println "Import complete!"))
 
-(defn -main
-  [& [db-uri commit]]
+(defn main [& [db-uri commit]]
   (if db-uri
     (let [conn (ensure-db db-uri)] 
       (import-git conn (unimported-commits (d/db conn) commit)))
     (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
+(defn -main
+  [& args]
+  (apply main args)
+  (shutdown-agents)
+  (System/exit 0))
+
 
 (comment
-;;(def uri "datomic:mem://codeq")
-(def uri "datomic:free://localhost:4334/codeq")
-(datomic.codeq.core/-main uri "c3bd979cfe65da35253b25cb62aad4271430405c")
-(datomic.codeq.core/-main uri  "20f8db11804afc8c5a1752257d5fdfcc2d131d08")
-(datomic.codeq.core/-main uri)
+(def uri "datomic:mem://codeq")
+;;(def uri "datomic:free://localhost:4334/codeq")
+(datomic.codeq.core/main uri "c3bd979cfe65da35253b25cb62aad4271430405c")
+(datomic.codeq.core/main uri  "20f8db11804afc8c5a1752257d5fdfcc2d131d08")
+(datomic.codeq.core/main uri)
 (require '[datomic.api :as d])
 (def conn (d/connect uri))
 (def db (d/db conn))
-(seq (d/datoms db :aevt :git/type))
+(seq (d/datoms db :aevt :file/name))
 )
