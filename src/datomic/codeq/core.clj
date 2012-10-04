@@ -49,6 +49,21 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
+       :db/ident :git/commits
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/many
+       :db/doc "Associate repo with these git commits"
+       :db.install/_attribute :db.part/db}
+      
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/repo
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "A git repo uri"
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
        :db/ident :git/parents
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/many
@@ -180,6 +195,27 @@
 ;;040000 tree 6b880666740300ac57361d5aee1a90488ba1305c	src
 ;;040000 tree 407924e4812c72c880b011b5a1e0b9cb4eb68cfa	test
 
+;; example git remote origin
+;;RichMacPro:codeq rich$ git remote show -n origin
+;;* remote origin
+;;  Fetch URL: https://github.com/Datomic/codeq.git
+;;  Push  URL: https://github.com/Datomic/codeq.git
+;;  HEAD branch: (not queried)
+
+(defn get-repo-uri
+  "returns [uri name]"
+  []
+  (with-open [s (exec-stream (str "git remote show -n origin"))]
+    (let [es (line-seq s)
+          ^String line (second es)
+          uri (subs line (inc (.lastIndexOf line " ")))
+          noff (.lastIndexOf uri "/")
+          noff (if (not (pos? noff)) (.lastIndexOf uri ":") noff)
+          name (subs uri (inc noff))
+          _ (assert (and (pos? (count name)) (.endsWith name ".git")) "Can't find remote origin")
+          name (subs name 0 (.indexOf name "."))]
+      [uri name])))
+
 (defn dir
   "Returns [[sha :type filename] ...]"
   [tree]
@@ -236,7 +272,7 @@
        ~g)))
 
 (defn commit-tx-data
-  [db {:keys [sha msg tree parents author authored committer committed] :as commit}]
+  [db repo repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
   (let [tempid? map? ;;todo - better pred
         sha->id (index->id-fn db :git/sha)
         email->id (index->id-fn db :email/address)
@@ -266,9 +302,10 @@
                                          data es))
                                data)]
                     [nodeid data]))
-        [treeid treedata] (tx-data [tree :tree ""])
+        [treeid treedata] (tx-data [tree :tree repo-name])
         tx (into treedata
-                 [{:db/id (d/tempid :db.part/tx)
+                 [[:db/add repo :git/commits cid]
+                  {:db/id (d/tempid :db.part/tx)
                    :git/commit cid
                    :codeq/op :import}
                   (cond-> {:db/id cid
@@ -324,18 +361,30 @@
     conn))
 
 (defn import-git
-  [conn commits]
-  (doseq [commit commits]
-    (let [db (d/db conn)]
-      (println "Importing commit:" (:sha commit))
-      (d/transact conn (commit-tx-data db commit))))
-  (d/request-index conn)
-  (println "Import complete!"))
+  [conn repo-uri repo-name commits]
+  ;;todo - add already existing commits to new repo if it includes them
+  (println "Importing repo:" repo-uri "as:" repo-name)
+  (let [db (d/db conn)
+        repo
+        (or (ffirst (d/q '[:find ?e :in $ ?uri :where [?e :git/repo ?uri]] db repo-uri))
+            (let [temp (d/tempid :db.part/user)
+                  tx-ret @(d/transact conn [[:db/add temp :git/repo repo-uri]])
+                  repo (d/resolve-tempid (d/db conn) (:tempids tx-ret) temp)]
+              (println "Adding repo" repo-uri)
+              repo))]      
+    (doseq [commit commits]
+      (let [db (d/db conn)]
+        (println "Importing commit:" (:sha commit))
+        (d/transact conn (commit-tx-data db repo repo-name commit))))
+    (d/request-index conn)
+    (println "Import complete!")))
 
 (defn main [& [db-uri commit]]
   (if db-uri
-    (let [conn (ensure-db db-uri)] 
-      (import-git conn (unimported-commits (d/db conn) commit)))
+    (let [conn (ensure-db db-uri)
+          [repo-uri repo-name] (get-repo-uri)]
+      ;(prn repo-uri)
+      (import-git conn repo-uri repo-name (unimported-commits (d/db conn) commit)))
     (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
 (defn -main
@@ -346,7 +395,7 @@
 
 
 (comment
-(def uri "datomic:mem://codeq")
+(def uri "datomic:mem://git")
 ;;(def uri "datomic:free://localhost:4334/codeq")
 (datomic.codeq.core/main uri "c3bd979cfe65da35253b25cb62aad4271430405c")
 (datomic.codeq.core/main uri  "20f8db11804afc8c5a1752257d5fdfcc2d131d08")
@@ -355,4 +404,6 @@
 (def conn (d/connect uri))
 (def db (d/db conn))
 (seq (d/datoms db :aevt :file/name))
+(seq (d/datoms db :aevt :git/tree))
+(d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
 )
