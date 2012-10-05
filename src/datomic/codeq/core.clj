@@ -130,6 +130,13 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
+       :db/ident :git/paths
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/many
+       :db/doc "paths of a tree node"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
        :db/ident :git/object
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
@@ -280,29 +287,38 @@
         authorid (email->id author)
         committerid (email->id committer)
         cid (d/tempid :db.part/user)
-        tx-data (fn f [[sha type filename]]
-                  (let [id (sha->id sha)
+        tx-data (fn f [inpath [sha type filename]]
+                  (let [path (str inpath filename)
+                        id (sha->id sha)
                         filenameid (filename->id filename)
+                        pathid (filename->id path)
                         nodeid (or (and (not (tempid? id))
                                         (not (tempid? filenameid))
                                         (ffirst (d/q '[:find ?e :in $ ?filename ?id
                                                        :where [?e :git/filename ?filename] [?e :git/object ?id]]
                                                      db filenameid id)))
                                    (d/tempid :db.part/user))
+                        newpath (or (tempid? pathid) (tempid? nodeid)
+                                    (not (ffirst (d/q '[:find ?node :in $ ?path
+                                                        :where [?node :git/paths ?path]]
+                                                      db pathid))))
                         data (cond-> []
                                      (tempid? filenameid) (conj [:db/add filenameid :file/name filename])
+                                     (tempid? pathid) (conj [:db/add pathid :file/name path])
                                      (tempid? nodeid) (conj {:db/id nodeid :git/filename filenameid :git/object id})
+                                     newpath (conj [:db/add nodeid :git/paths pathid])
                                      (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
-                        data (if (and (tempid? id) (= type :tree))
+                        data (if (and newpath (= type :tree))
                                (let [es (dir sha)]
                                  (reduce (fn [data child]
-                                           (let [[cid cdata] (f child)
+                                           (let [[cid cdata] (f (str path "/") child)
                                                  data (into data cdata)]
-                                             (conj data [:db/add id :git/nodes cid])))
+                                             (cond-> data
+                                                     (tempid? id) (conj [:db/add id :git/nodes cid]))))
                                          data es))
                                data)]
                     [nodeid data]))
-        [treeid treedata] (tx-data [tree :tree repo-name])
+        [treeid treedata] (tx-data nil [tree :tree repo-name])
         tx (into treedata
                  [[:db/add repo :git/commits cid]
                   {:db/id (d/tempid :db.part/tx)
@@ -404,6 +420,6 @@
 (def conn (d/connect uri))
 (def db (d/db conn))
 (seq (d/datoms db :aevt :file/name))
-(seq (d/datoms db :aevt :git/tree))
+(seq (d/datoms db :aevt :git/object))
 (d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
 )
