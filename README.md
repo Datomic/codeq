@@ -1,6 +1,6 @@
 # codeq
 
-A Clojure+Datomic application designed to do a code-aware import of your git repo into a [Datomic](http://datomic.com) db
+A Clojure+Datomic application designed to do code-aware imports of your git repos into a [Datomic](http://datomic.com) db
 
 ## Usage
 
@@ -39,6 +39,7 @@ You can then (or during) connect to the same db URI with a peer. Or, just start 
 
 Browse to [localhost:8080](http://localhost:8080). You should see the `free` storage and the `git` db within it.
 
+The [schema diagram](https://github.com/downloads/Datomic/codeq/codeq.pdf) will help you get oriented.
 
 ## License
 
