@@ -191,6 +191,8 @@
 ;;maybe more parents
 ;;author Rich Hickey <richhickey@gmail.com> 1348869325 -0400
 ;;committer Rich Hickey <richhickey@gmail.com> 1348869325 -0400
+;;then blank line
+;;then commit message
 
 
 ;;example tree
@@ -235,18 +237,24 @@
             es))))
 
 (defn commit
-  [[sha msg]]
+  [[sha _]]
   (let [trim-email (fn [s] (subs s 1 (dec (count s))))
         dt (fn [ds] (Date. (* 1000 (Integer/parseInt ds))))
-        [tree parents author committer]
+        [tree parents author committer msg]
         (with-open [s (exec-stream (str "git cat-file -p " sha))]
-          (let [lines (mapv #(string/split % #"\s") (line-seq s))
-                tree (-> lines (nth 0) (nth 1))
-                [plines xs] (split-with #(= (nth % 0) "parent") (rest lines))]
+          (let [lines (line-seq s)
+                slines (mapv #(string/split % #"\s") lines)
+                tree (-> slines (nth 0) (nth 1))
+                [plines xs] (split-with #(= (nth % 0) "parent") (rest slines))]
             [tree
              (seq (map second plines))
              (vec (reverse (first xs)))
-             (vec (reverse (second xs)))]))]
+             (vec (reverse (second xs)))
+             (->> lines 
+                  (drop-while #(not= % ""))
+                  rest
+                  (interpose "\n")
+                  (apply str))]))]
     {:sha sha
      :msg msg
      :tree tree
@@ -412,7 +420,7 @@
 
 (comment
 (def uri "datomic:mem://git")
-;;(def uri "datomic:free://localhost:4334/codeq")
+;;(def uri "datomic:free://localhost:4334/git")
 (datomic.codeq.core/main uri "c3bd979cfe65da35253b25cb62aad4271430405c")
 (datomic.codeq.core/main uri  "20f8db11804afc8c5a1752257d5fdfcc2d131d08")
 (datomic.codeq.core/main uri)
@@ -420,6 +428,7 @@
 (def conn (d/connect uri))
 (def db (d/db conn))
 (seq (d/datoms db :aevt :file/name))
-(seq (d/datoms db :aevt :git/object))
+(seq (d/datoms db :aevt :git/message))
 (d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
+(d/q '[:find ?m :where [_ :git/message ?m] [(.contains ?m "\n")]] db)
 )
