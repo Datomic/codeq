@@ -358,12 +358,11 @@
   "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
   or any acceptable commit name arg for git log"
   [commit-name]
-  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline " commit-name))]
-                  (reverse
-                   (mapv
-                    #(vector (subs % 0 40)
-                             (subs % 41 (count %)))
-                    (line-seq s))))] 
+  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse" commit-name))]
+                  (mapv
+                   #(vector (subs % 0 40)
+                            (subs % 41 (count %)))
+                   (line-seq s)))] 
     commits))
 
 (defn unimported-commits
