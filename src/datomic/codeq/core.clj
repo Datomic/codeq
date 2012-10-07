@@ -9,7 +9,11 @@
 (ns datomic.codeq.core
   (:require [datomic.api :as d]
             [clojure.java.io :as io]
-            [clojure.string :as string])
+            [clojure.set]
+            [clojure.string :as string]
+            [datomic.codeq.util :refer [cond-> index->id-fn tempid?]]
+            [datomic.codeq.analyzer :as az]
+            [datomic.codeq.analyzers.clj])
   (:import java.util.Date)
   (:gen-class))
 
@@ -17,11 +21,34 @@
 
 (def schema
      [
+      ;;tx attrs
       {:db/id #db/id[:db.part/db]
        :db/ident :git/commit
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Associate tx with this git commit"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :git/file
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Associate tx with this git blob"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/analyzer
+       :db/valueType :db.type/keyword
+       :db/cardinality :db.cardinality/one
+       :db/index true
+       :db/doc "Associate tx with this analyzer"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/analyzerRev
+       :db/valueType :db.type/long
+       :db/cardinality :db.cardinality/one
+       :db/doc "Associate tx with this analyzer revision"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
@@ -32,6 +59,7 @@
        :db/doc "Associate tx with this operation - one of :import, :analyze"
        :db.install/_attribute :db.part/db}
 
+      ;;git stuff
       {:db/id #db/id[:db.part/db]
        :db/ident :git/type
        :db/valueType :db.type/keyword
@@ -166,6 +194,60 @@
        :db/fulltext true
        :db/unique :db.unique/identity
        :db.install/_attribute :db.part/db}
+
+      ;;codeq stuff
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/file
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Git file containing codeq"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/loc
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "Location of codeq in file. A location string in format \"line col endline endcol\", one-based"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/parent
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Parent (containing) codeq of codeq (if one)"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :codeq/code
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "Code entity of codeq"
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :code/sha
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "SHA of whitespace-minified code segment text: consecutive ws becomes a single space, then trim. ws-sensitive langs don't minify."
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :code/text
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "The source code for a code segment"
+       :db/fulltext true
+       :db.install/_attribute :db.part/db}
+
+      {:db/id #db/id[:db.part/db]
+       :db/ident :code/name
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "A globally-namespaced programming language identifier"
+       :db/fulltext true
+       :db/unique :db.unique/identity
+       :db.install/_attribute :db.part/db}
       ])
 
 (defn ^java.io.Reader exec-stream 
@@ -264,27 +346,7 @@
      :committer (trim-email (committer 2))
      :committed (dt (committer 1))}))
 
-(defn index-get-id
-  [db attr v]
-  (let [d (first (d/index-range db attr v nil))]
-    (when (and d (= (:v d) v))
-      (:e d))))
 
-(defn index->id-fn
-  [db attr]
-  (memoize
-   (fn [x]
-     (or (index-get-id db attr x)
-         (d/tempid :db.part/user)))))
-
-(defmacro cond->
-  [init & steps]
-  (assert (even? (count steps)))
-  (let [g (gensym)
-        pstep (fn [[pred step]] `(if ~pred (-> ~g ~step) ~g))]
-    `(let [~g ~init
-           ~@(interleave (repeat g) (map pstep (partition 2 steps)))]
-       ~g)))
 
 (defn commit-tx-data
   [db repo repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
@@ -350,15 +412,18 @@
                                               id))
                                           parents)))])
         tx (cond-> tx
-                   (tempid? authorid) (conj [:db/add authorid :email/address author])
-                   (and (not= committer author) (tempid? committerid)) (conj [:db/add committerid :email/address committer]))]
+                   (tempid? authorid) 
+                   (conj [:db/add authorid :email/address author])
+                   
+                   (and (not= committer author) (tempid? committerid)) 
+                   (conj [:db/add committerid :email/address committer]))]
     tx))
 
 (defn commits
   "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
   or any acceptable commit name arg for git log"
   [commit-name]
-  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse" commit-name))]
+  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse " commit-name))]
                   (mapv
                    #(vector (subs % 0 40)
                             (subs % 41 (count %)))
@@ -402,13 +467,68 @@
     (d/request-index conn)
     (println "Import complete!")))
 
+(def analyzers [(datomic.codeq.analyzers.clj/impl)])
+
+(defn run-analyzers
+  [conn]
+  (println "Analyzing...")
+  (doseq [a analyzers]
+    (let [aname (az/keyname a)
+          exts (az/extensions a)
+          srevs (set (map first (d/q '[:find ?rev :in $ ?a :where 
+                                       [?tx :codeq/op :schema]
+                                       [?tx :codeq/analyzer ?a]
+                                       [?tx :codeq/analyzerRev ?rev]]
+                                     (d/db conn) aname)))]
+      (println "Running analyzer:" aname "on" exts)
+      ;;install schema(s) if not yet present
+      (doseq [[rev aschema] (az/schemas a)]
+        (when-not (srevs rev)
+          (d/transact conn 
+                      (conj aschema {:db/id (d/tempid :db.part/tx)
+                                     :codeq/op :schema
+                                     :codeq/analyzer aname
+                                     :codeq/analyzerRev rev}))))
+      (let [db (d/db conn)
+            arev (az/revision a)
+            ;;candidate files
+            cfiles (set (map first (d/q '[:find ?f :in $ [?ext ...] :where
+                                          [?fn :file/name ?n]
+                                          [(.endsWith ^String ?n ?ext)]
+                                          [?node :git/filename ?fn]
+                                          [?node :git/object ?f]]
+                                        db exts)))
+            ;;already analyzed files
+            afiles (set (map first (d/q '[:find ?f :in $ ?a ?rev :where
+                                          [?tx :codeq/op :analyze]
+                                          [?tx :codeq/analyzer ?a]
+                                          [?tx :codeq/analyzerRev ?rev]
+                                          [?tx :codeq/file ?f]]
+                                        db aname arev)))]
+        ;;find files not yet analyzed
+        (doseq [f (clojure.set/difference cfiles afiles)]
+          ;;analyze them
+          (println "analyzing file:" f)
+          (let [db (d/db conn)
+                src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
+                    (slurp s))
+                adata (az/analyze a db f src)]
+            (d/transact conn 
+                        (conj adata {:db/id (d/tempid :db.part/tx)
+                                     :codeq/op :analyze
+                                     :codeq/file f
+                                     :codeq/analyzer aname
+                                     :codeq/analyzerRev arev})))))))
+  (println "Analysis complete!"))
+
 (defn main [& [db-uri commit]]
-  (if db-uri
-    (let [conn (ensure-db db-uri)
-          [repo-uri repo-name] (get-repo-uri)]
-      ;(prn repo-uri)
-      (import-git conn repo-uri repo-name (unimported-commits (d/db conn) commit)))
-    (println "Usage: datomic.codeq.core db-uri [commit-name]")))
+  (if db-uri 
+      (let [conn (ensure-db db-uri)
+            [repo-uri repo-name] (get-repo-uri)]
+        ;;(prn repo-uri)
+        (import-git conn repo-uri repo-name (unimported-commits (d/db conn) commit))
+        (run-analyzers conn))
+      (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
 (defn -main
   [& args]
@@ -428,6 +548,22 @@
 (def db (d/db conn))
 (seq (d/datoms db :aevt :file/name))
 (seq (d/datoms db :aevt :git/message))
+(seq (d/datoms db :aevt :codeq/file))
+(count (seq (d/datoms db :aevt :code/sha)))
 (d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
 (d/q '[:find ?m :where [_ :git/message ?m] [(.contains ?m "\n")]] db)
+(d/q '[:find ?m :where [_ :code/text ?m] [(.contains ?m "(ns ")]] db)
+(def x "(doseq [f (clojure.set/difference cfiles afiles)]
+          ;;analyze them
+          (println \"analyzing file:\" f)
+          (let [db (d/db conn)
+                s (with-open [s (exec-stream (str \"git cat-file -p \" (:git/sha (d/entity db f))))]
+                    (slurp s))
+                adata (az/analyze a db s)]
+            (d/transact conn 
+                        (conj adata {:db/id (d/tempid :db.part/tx)
+                                     :codeq/op :analyze
+                                     :codeq/file f
+                                     :codeq/analyzer aname
+                                     :codeq/analyzerRev arev}))))")
 )
