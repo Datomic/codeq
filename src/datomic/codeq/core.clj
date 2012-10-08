@@ -237,7 +237,7 @@
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one
        :db/doc "The source code for a code segment"
-       :db/fulltext true
+       ;;:db/fulltext true
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
@@ -506,19 +506,22 @@
                                           [?tx :codeq/file ?f]]
                                         db aname arev)))]
         ;;find files not yet analyzed
-        (doseq [f (clojure.set/difference cfiles afiles)]
+        (doseq [f (sort (clojure.set/difference cfiles afiles))]
           ;;analyze them
-          (println "analyzing file:" f)
-          (let [db (d/db conn)
-                src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
-                    (slurp s))
-                adata (az/analyze a db f src)]
-            (d/transact conn 
-                        (conj adata {:db/id (d/tempid :db.part/tx)
-                                     :codeq/op :analyze
-                                     :codeq/file f
-                                     :codeq/analyzer aname
-                                     :codeq/analyzerRev arev})))))))
+          (println "analyzing file:" f " - sha: " (:git/sha (d/entity db f)))
+          (try
+           (let [db (d/db conn)
+                 src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
+                       (slurp s))
+                 adata (az/analyze a db f src)]
+             (d/transact conn 
+                         (conj adata {:db/id (d/tempid :db.part/tx)
+                                      :codeq/op :analyze
+                                      :codeq/file f
+                                      :codeq/analyzer aname
+                                      :codeq/analyzerRev arev})))
+           (catch Exception ex
+             (println (.getMessage ex))))))))
   (println "Analysis complete!"))
 
 (defn main [& [db-uri commit]]

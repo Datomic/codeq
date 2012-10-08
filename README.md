@@ -14,7 +14,7 @@ Unzip it, then start the Datomic Free transactor. Follow the instructions for [r
 
     cd theGitRepoYouWantToImport
 
-    java -jar whereverYouPutCodeq/target/codeq-0.1.0-SNAPSHOT-standalone.jar datomic:free://localhost:4334/git
+    java -server -Xmx1g -jar whereverYouPutCodeq/target/codeq-0.1.0-SNAPSHOT-standalone.jar datomic:free://localhost:4334/git
 
 This will create a db called `git` (you can call it whatever you like) and import the commits from the local view of the repo. You should see output like:
 
