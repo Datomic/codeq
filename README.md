@@ -28,7 +28,13 @@ This will create a db called `git` (you can call it whatever you like) and impor
     Importing commit: 6bbfd943766e11e52a3fe21b177d55536892d132
     Import complete!
 
-The import is not too peppy, since it shells to `git` relentlessly, but it imports e.g. Clojure's entire commit history in about 10 minutes.
+    Analyzing...
+    Running analyzer: :clj on [.clj]
+    analyzing file: 17592186045504
+    analyzing file: 17592186045496
+    Analysis complete!
+
+The import is not too peppy, since it shells to `git` relentlessly, but it imports e.g. Clojure's entire commit history in about 10 minutes, plus analysis (not yet timed).
 
 You can import more than one repo into the same db. You can re-import later after some more commits and they will be incrementally added.
 

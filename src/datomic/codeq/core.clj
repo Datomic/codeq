@@ -550,9 +550,20 @@
 (seq (d/datoms db :aevt :git/message))
 (seq (d/datoms db :aevt :codeq/file))
 (count (seq (d/datoms db :aevt :code/sha)))
+(take 20 (seq (d/datoms db :aevt :code/text)))
+(seq (d/datoms db :aevt :code/name))
+(count (seq (d/datoms db :aevt :codeq/code)))
 (d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
-(d/q '[:find ?m :where [_ :git/message ?m] [(.contains ?m "\n")]] db)
-(d/q '[:find ?m :where [_ :code/text ?m] [(.contains ?m "(ns ")]] db)
+(d/q '[:find ?m :where [_ :git/message ?m] [(.contains ^String ?m "\n")]] db)
+(d/q '[:find ?m :where [_ :code/text ?m] [(.contains ^String ?m "(ns ")]] db)
+(sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/def ?cn] [?cq :codeq/code ?def]] db))
+(sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/ns ?cn] [?cq :codeq/code ?def]] db))
+(sort (d/q '[:find ?var ?def ?n :where 
+             [?cn :code/name ?var] 
+             [?cq :clj/ns ?cn]
+             [?cq :codeq/file ?f]
+             [?n :git/object ?f]
+             [?cq :codeq/code ?def]] db))
 (def x "(doseq [f (clojure.set/difference cfiles afiles)]
           ;;analyze them
           (println \"analyzing file:\" f)

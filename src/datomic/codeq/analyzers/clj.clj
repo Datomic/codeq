@@ -13,18 +13,51 @@
 
 (defn analyze-1
   "returns [tx-data ctx]"
-  [db f x loc seg ret {:keys [sha->id added ns] :as ctx}]
+  [db f x loc seg ret {:keys [sha->id codename->id added ns] :as ctx}]
   (if loc
     (let [sha (-> seg az/ws-minify az/sha)
-          cid (sha->id sha)
-          newcid (and (tempid? cid) (not (added cid)))
-          ret (cond-> ret newcid (conj {:db/id cid :code/sha sha :code/text seg}))
-          added (cond-> added newcid (conj cid))]
+          codeid (sha->id sha)
+          newcodeid (and (tempid? codeid) (not (added codeid)))
+          ret (cond-> ret newcodeid (conj {:db/id codeid :code/sha sha :code/text seg}))
+          added (cond-> added newcodeid (conj codeid))
+
+          codeqid (or (ffirst (d/q '[:find ?e :in $ ?f ?loc
+                                     :where [?e :codeq/file ?f] [?e :codeq/loc ?loc]]
+                                   db f loc))
+                      (d/tempid :db.part/user))
+
+          op (first x)
+          ns? (= op 'ns)
+          defing (and ns
+                      (symbol? op)
+                      (#{'def 'defn} op))
+          
+          naming (cond 
+                  ns? (str (second x))
+                  defing (str (symbol (name ns) (name (second x)))))
+
+          nameid (when naming (codename->id naming))
+
+          ret (cond-> ret 
+                      (tempid? codeqid)
+                      (conj {:db/id codeqid
+                             :codeq/file f
+                             :codeq/loc loc
+                             :codeq/code codeid})
+                      
+                      ns?
+                      (conj [:db/add codeqid :clj/ns nameid])
+
+                      defing
+                      (conj [:db/add codeqid :clj/def nameid])
+                      
+                      (tempid? nameid)
+                      (conj [:db/add nameid :code/name naming]))]
       [ret (assoc ctx :added added)])
     [ret ctx]))
 
 (defn analyze 
-   [a db f src]
+   [db f src]
    (with-open [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. src))]
      (let [loffs (az/line-offsets src)
            eof (Object.)
@@ -46,23 +79,26 @@
                  [ret ctx] (analyze-1 db f x loc seg ret ctx)]
              (recur ret ctx (read r false eof))))))))
 
+(defn schemas []
+  {1 [{:db/id #db/id[:db.part/db]
+       :db/ident :clj/ns
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "codename of ns defined by expression"
+       :db.install/_attribute :db.part/db}
+      {:db/id #db/id[:db.part/db]
+       :db/ident :clj/def
+       :db/valueType :db.type/ref
+       :db/cardinality :db.cardinality/one
+       :db/doc "codename defined by expression"
+       :db.install/_attribute :db.part/db}]})
+
 (deftype CljAnalyzer []
   az/Analyzer
   (keyname [a] :clj)
   (revision [a] 1)
   (extensions [a] [".clj"])
-  (schemas [a] {1 [{:db/id #db/id[:db.part/db]
-                    :db/ident :clj/ns
-                    :db/valueType :db.type/ref
-                    :db/cardinality :db.cardinality/one
-                    :db/doc "codename of ns defined by expression"
-                    :db.install/_attribute :db.part/db}
-                   {:db/id #db/id[:db.part/db]
-                    :db/ident :clj/def
-                    :db/valueType :db.type/ref
-                    :db/cardinality :db.cardinality/one
-                    :db/doc "codename defined by expression"
-                    :db.install/_attribute :db.part/db}]})
-  (analyze [a db f src] (analyze a db f src)))
+  (schemas [a] (schemas))
+  (analyze [a db f src] (analyze db f src)))
 
 (defn impl [] (CljAnalyzer.))
