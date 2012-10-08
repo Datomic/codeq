@@ -509,19 +509,20 @@
         (doseq [f (sort (clojure.set/difference cfiles afiles))]
           ;;analyze them
           (println "analyzing file:" f " - sha: " (:git/sha (d/entity db f)))
-          (try
-           (let [db (d/db conn)
-                 src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
-                       (slurp s))
-                 adata (az/analyze a db f src)]
-             (d/transact conn 
-                         (conj adata {:db/id (d/tempid :db.part/tx)
-                                      :codeq/op :analyze
-                                      :codeq/file f
-                                      :codeq/analyzer aname
-                                      :codeq/analyzerRev arev})))
-           (catch Exception ex
-             (println (.getMessage ex))))))))
+          (let [db (d/db conn)
+                src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
+                      (slurp s))
+                adata (try
+                        (az/analyze a db f src)
+                        (catch Exception ex
+                          (println (.getMessage ex))
+                          []))]
+            (d/transact conn 
+                        (conj adata {:db/id (d/tempid :db.part/tx)
+                                     :codeq/op :analyze
+                                     :codeq/file f
+                                     :codeq/analyzer aname
+                                     :codeq/analyzerRev arev})))))))
   (println "Analysis complete!"))
 
 (defn main [& [db-uri commit]]
