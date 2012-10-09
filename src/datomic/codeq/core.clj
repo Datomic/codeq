@@ -23,21 +23,21 @@
      [
       ;;tx attrs
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/commit
+       :db/ident :tx/commit
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Associate tx with this git commit"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/file
+       :db/ident :tx/file
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Associate tx with this git blob"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :codeq/analyzer
+       :db/ident :tx/analyzer
        :db/valueType :db.type/keyword
        :db/cardinality :db.cardinality/one
        :db/index true
@@ -45,14 +45,14 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :codeq/analyzerRev
+       :db/ident :tx/analyzerRev
        :db/valueType :db.type/long
        :db/cardinality :db.cardinality/one
        :db/doc "Associate tx with this analyzer revision"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :codeq/op
+       :db/ident :tx/op
        :db/valueType :db.type/keyword
        :db/index true
        :db/cardinality :db.cardinality/one
@@ -77,14 +77,14 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/commits
+       :db/ident :repo/commits
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/many
        :db/doc "Associate repo with these git commits"
        :db.install/_attribute :db.part/db}
       
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/repo
+       :db/ident :repo/uri
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one
        :db/doc "A git repo uri"
@@ -92,21 +92,21 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/parents
+       :db/ident :commit/parents
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/many
        :db/doc "Parents of a commit"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/tree
+       :db/ident :commit/tree
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Root node of a commit"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/message
+       :db/ident :commit/message
        :db/valueType :db.type/string
        :db/cardinality :db.cardinality/one
        :db/doc "A commit message"
@@ -114,14 +114,14 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/author
+       :db/ident :commit/author
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Person who authored a commit"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/authoredAt
+       :db/ident :commit/authoredAt
        :db/valueType :db.type/instant
        :db/cardinality :db.cardinality/one
        :db/doc "Timestamp of authorship of commit"
@@ -129,14 +129,14 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/committer
+       :db/ident :commit/committer
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Person who committed a commit"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/committedAt
+       :db/ident :commit/committedAt
        :db/valueType :db.type/instant
        :db/cardinality :db.cardinality/one
        :db/doc "Timestamp of commit"
@@ -144,28 +144,28 @@
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/nodes
+       :db/ident :tree/nodes
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/many
        :db/doc "Nodes of a git tree"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/filename
+       :db/ident :node/filename
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "filename of a tree node"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/paths
+       :db/ident :node/paths
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/many
        :db/doc "paths of a tree node"
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
-       :db/ident :git/object
+       :db/ident :node/object
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Git object (tree/blob) in a tree node"
@@ -258,7 +258,7 @@
       io/reader))
 
 (defn ensure-schema [conn]
-  (or (-> conn d/db (d/entid :git/commit))
+  (or (-> conn d/db (d/entid :tx/commit))
       @(d/transact conn schema)))
 
 ;;example commit - git cat-file -p
@@ -365,18 +365,18 @@
                         nodeid (or (and (not (tempid? id))
                                         (not (tempid? filenameid))
                                         (ffirst (d/q '[:find ?e :in $ ?filename ?id
-                                                       :where [?e :git/filename ?filename] [?e :git/object ?id]]
+                                                       :where [?e :node/filename ?filename] [?e :node/object ?id]]
                                                      db filenameid id)))
                                    (d/tempid :db.part/user))
                         newpath (or (tempid? pathid) (tempid? nodeid)
                                     (not (ffirst (d/q '[:find ?node :in $ ?path
-                                                        :where [?node :git/paths ?path]]
+                                                        :where [?node :node/paths ?path]]
                                                       db pathid))))
                         data (cond-> []
                                      (tempid? filenameid) (conj [:db/add filenameid :file/name filename])
                                      (tempid? pathid) (conj [:db/add pathid :file/name path])
-                                     (tempid? nodeid) (conj {:db/id nodeid :git/filename filenameid :git/object id})
-                                     newpath (conj [:db/add nodeid :git/paths pathid])
+                                     (tempid? nodeid) (conj {:db/id nodeid :node/filename filenameid :node/object id})
+                                     newpath (conj [:db/add nodeid :node/paths pathid])
                                      (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
                         data (if (and newpath (= type :tree))
                                (let [es (dir sha)]
@@ -384,27 +384,27 @@
                                            (let [[cid cdata] (f (str path "/") child)
                                                  data (into data cdata)]
                                              (cond-> data
-                                                     (tempid? id) (conj [:db/add id :git/nodes cid]))))
+                                                     (tempid? id) (conj [:db/add id :tree/nodes cid]))))
                                          data es))
                                data)]
                     [nodeid data]))
         [treeid treedata] (tx-data nil [tree :tree repo-name])
         tx (into treedata
-                 [[:db/add repo :git/commits cid]
+                 [[:db/add repo :repo/commits cid]
                   {:db/id (d/tempid :db.part/tx)
-                   :git/commit cid
-                   :codeq/op :import}
+                   :tx/commit cid
+                   :tx/op :import}
                   (cond-> {:db/id cid
                            :git/type :commit
-                           :git/tree treeid
+                           :commit/tree treeid
                            :git/sha sha
-                           :git/author authorid
-                           :git/authoredAt authored
-                           :git/committer committerid
-                           :git/committedAt committed
+                           :commit/author authorid
+                           :commit/authoredAt authored
+                           :commit/committer committerid
+                           :commit/committedAt committed
                            }
-                          msg (assoc :git/message msg)
-                          parents (assoc :git/parents
+                          msg (assoc :commit/message msg)
+                          parents (assoc :commit/parents
                                     (mapv (fn [p]
                                             (let [id (sha->id p)]
                                               (assert (not (tempid? id))
@@ -435,8 +435,8 @@
   (let [imported (into {}
                        (d/q '[:find ?sha ?e
                               :where
-                              [?tx :codeq/op :import]
-                              [?tx :git/commit ?e]
+                              [?tx :tx/op :import]
+                              [?tx :tx/commit ?e]
                               [?e :git/sha ?sha]]
                             db))]
     (pmap commit (remove (fn [[sha _]] (imported sha)) (commits commit-name)))))
@@ -454,9 +454,9 @@
   (println "Importing repo:" repo-uri "as:" repo-name)
   (let [db (d/db conn)
         repo
-        (or (ffirst (d/q '[:find ?e :in $ ?uri :where [?e :git/repo ?uri]] db repo-uri))
+        (or (ffirst (d/q '[:find ?e :in $ ?uri :where [?e :repo/uri ?uri]] db repo-uri))
             (let [temp (d/tempid :db.part/user)
-                  tx-ret @(d/transact conn [[:db/add temp :git/repo repo-uri]])
+                  tx-ret @(d/transact conn [[:db/add temp :repo/uri repo-uri]])
                   repo (d/resolve-tempid (d/db conn) (:tempids tx-ret) temp)]
               (println "Adding repo" repo-uri)
               repo))]      
@@ -476,9 +476,9 @@
     (let [aname (az/keyname a)
           exts (az/extensions a)
           srevs (set (map first (d/q '[:find ?rev :in $ ?a :where 
-                                       [?tx :codeq/op :schema]
-                                       [?tx :codeq/analyzer ?a]
-                                       [?tx :codeq/analyzerRev ?rev]]
+                                       [?tx :tx/op :schema]
+                                       [?tx :tx/analyzer ?a]
+                                       [?tx :tx/analyzerRev ?rev]]
                                      (d/db conn) aname)))]
       (println "Running analyzer:" aname "on" exts)
       ;;install schema(s) if not yet present
@@ -486,24 +486,24 @@
         (when-not (srevs rev)
           (d/transact conn 
                       (conj aschema {:db/id (d/tempid :db.part/tx)
-                                     :codeq/op :schema
-                                     :codeq/analyzer aname
-                                     :codeq/analyzerRev rev}))))
+                                     :tx/op :schema
+                                     :tx/analyzer aname
+                                     :tx/analyzerRev rev}))))
       (let [db (d/db conn)
             arev (az/revision a)
             ;;candidate files
             cfiles (set (map first (d/q '[:find ?f :in $ [?ext ...] :where
                                           [?fn :file/name ?n]
                                           [(.endsWith ^String ?n ?ext)]
-                                          [?node :git/filename ?fn]
-                                          [?node :git/object ?f]]
+                                          [?node :node/filename ?fn]
+                                          [?node :node/object ?f]]
                                         db exts)))
             ;;already analyzed files
             afiles (set (map first (d/q '[:find ?f :in $ ?a ?rev :where
-                                          [?tx :codeq/op :analyze]
-                                          [?tx :codeq/analyzer ?a]
-                                          [?tx :codeq/analyzerRev ?rev]
-                                          [?tx :codeq/file ?f]]
+                                          [?tx :tx/op :analyze]
+                                          [?tx :tx/analyzer ?a]
+                                          [?tx :tx/analyzerRev ?rev]
+                                          [?tx :tx/file ?f]]
                                         db aname arev)))]
         ;;find files not yet analyzed
         (doseq [f (sort (clojure.set/difference cfiles afiles))]
@@ -519,10 +519,10 @@
                           []))]
             (d/transact conn 
                         (conj adata {:db/id (d/tempid :db.part/tx)
-                                     :codeq/op :analyze
-                                     :codeq/file f
-                                     :codeq/analyzer aname
-                                     :codeq/analyzerRev arev})))))))
+                                     :tx/op :analyze
+                                     :tx/file f
+                                     :tx/analyzer aname
+                                     :tx/analyzerRev arev})))))))
   (println "Analysis complete!"))
 
 (defn main [& [db-uri commit]]
@@ -551,14 +551,14 @@
 (def conn (d/connect uri))
 (def db (d/db conn))
 (seq (d/datoms db :aevt :file/name))
-(seq (d/datoms db :aevt :git/message))
-(seq (d/datoms db :aevt :codeq/file))
+(seq (d/datoms db :aevt :commit/message))
+(seq (d/datoms db :aevt :tx/file))
 (count (seq (d/datoms db :aevt :code/sha)))
 (take 20 (seq (d/datoms db :aevt :code/text)))
 (seq (d/datoms db :aevt :code/name))
 (count (seq (d/datoms db :aevt :codeq/code)))
-(d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :git/filename ?f] [?n :git/object ?e]] db)
-(d/q '[:find ?m :where [_ :git/message ?m] [(.contains ^String ?m "\n")]] db)
+(d/q '[:find ?e :where [?f :file/name "core.clj"] [?n :node/filename ?f] [?n :node/object ?e]] db)
+(d/q '[:find ?m :where [_ :commit/message ?m] [(.contains ^String ?m "\n")]] db)
 (d/q '[:find ?m :where [_ :code/text ?m] [(.contains ^String ?m "(ns ")]] db)
 (sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/def ?cn] [?cq :codeq/code ?def]] db))
 (sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/ns ?cn] [?cq :codeq/code ?def]] db))
@@ -566,7 +566,7 @@
              [?cn :code/name ?var] 
              [?cq :clj/ns ?cn]
              [?cq :codeq/file ?f]
-             [?n :git/object ?f]
+             [?n :node/object ?f]
              [?cq :codeq/code ?def]] db))
 (def x "(doseq [f (clojure.set/difference cfiles afiles)]
           ;;analyze them
@@ -577,8 +577,8 @@
                 adata (az/analyze a db s)]
             (d/transact conn 
                         (conj adata {:db/id (d/tempid :db.part/tx)
-                                     :codeq/op :analyze
+                                     :tx/op :analyze
                                      :codeq/file f
-                                     :codeq/analyzer aname
-                                     :codeq/analyzerRev arev}))))")
+                                     :tx/analyzer aname
+                                     :tx/analyzerRev arev}))))")
 )
