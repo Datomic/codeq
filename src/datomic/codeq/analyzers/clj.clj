@@ -30,11 +30,14 @@
           ns? (= op 'ns)
           defing (and ns
                       (symbol? op)
-                      (#{'def 'defn} op))
+                      (.startsWith (name op) "def"))
           
-          naming (cond 
-                  ns? (str (second x))
-                  defing (str (symbol (name ns) (name (second x)))))
+          naming (let [nsym (second x)]
+                   (cond 
+                    ns? (str nsym)
+                    defing (if (namespace nsym)
+                             (str nsym)
+                             (str (symbol (name ns) (name nsym))))))
 
           nameid (when naming (codename->id naming))
 
@@ -49,7 +52,8 @@
                       (conj [:db/add codeqid :clj/ns nameid])
 
                       defing
-                      (conj [:db/add codeqid :clj/def nameid])
+                      (conj [:db/add codeqid :clj/def nameid]
+                            [:db/add codeqid :clj/defop (str op)])
                       
                       (tempid? nameid)
                       (conj [:db/add nameid :code/name naming]))]
@@ -91,12 +95,18 @@
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "codename defined by expression"
+       :db.install/_attribute :db.part/db}]
+   2 [{:db/id #db/id[:db.part/db]
+       :db/ident :clj/defop
+       :db/valueType :db.type/string
+       :db/cardinality :db.cardinality/one
+       :db/doc "the def form (defn, defmacro etc) used to create this definition"
        :db.install/_attribute :db.part/db}]})
 
 (deftype CljAnalyzer []
   az/Analyzer
   (keyname [a] :clj)
-  (revision [a] 1)
+  (revision [a] 2)
   (extensions [a] [".clj"])
   (schemas [a] (schemas))
   (analyze [a db f src] (analyze db f src)))
