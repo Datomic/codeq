@@ -1,6 +1,6 @@
 # codeq
 
-A Clojure+Datomic application designed to do code-aware imports of your git repos into a [Datomic](http://datomic.com) db
+**codeq** ('co-deck') is Clojure+Datomic application designed to do code-aware imports of your git repos into a [Datomic](http://datomic.com) db
 
 ## Usage
 
@@ -34,7 +34,7 @@ This will create a db called `git` (you can call it whatever you like) and impor
     analyzing file: 17592186045496
     Analysis complete!
 
-The import is not too peppy, since it shells to `git` relentlessly, but it imports e.g. Clojure's entire commit history in about 10 minutes, plus analysis (not yet timed).
+The import is not too peppy, since it shells to `git` relentlessly, but it imports e.g. Clojure's entire commit history in about 10 minutes, plus analysis.
 
 You can import more than one repo into the same db. You can re-import later after some more commits and they will be incrementally added.
 
@@ -47,6 +47,10 @@ Browse to [localhost:8080](http://localhost:8080). You should see the `free` sto
 
 The [schema diagram](https://github.com/downloads/Datomic/codeq/codeq.pdf) will help you get oriented.
 
+## More info
+
+See the [intro blog post](http://blog.datomic.com/2012/10/codeq.html) and the [wiki](https://github.com/Datomic/codeq/wiki)
+ 
 ## License
 
 Copyright © 2012 Metadata Partners, LLC
