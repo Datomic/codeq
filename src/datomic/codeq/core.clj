@@ -82,7 +82,7 @@
        :db/cardinality :db.cardinality/many
        :db/doc "Associate repo with these git commits"
        :db.install/_attribute :db.part/db}
-
+      
       {:db/id #db/id[:db.part/db]
        :db/ident :repo/uri
        :db/valueType :db.type/string
@@ -250,11 +250,11 @@
        :db.install/_attribute :db.part/db}
       ])
 
-(defn ^java.io.Reader exec-stream
+(defn ^java.io.Reader exec-stream 
   [^String cmd]
   (-> (Runtime/getRuntime)
-      (.exec cmd)
-      .getInputStream
+      (.exec cmd) 
+      .getInputStream 
       io/reader))
 
 (defn ensure-schema [conn]
@@ -304,8 +304,7 @@
           noff (if (not (pos? noff)) (.lastIndexOf uri ":") noff)
           name (subs uri (inc noff))
           _ (assert (pos? (count name)) "Can't find remote origin")
-          name (if (.endsWith name ".git") (subs name 0 (.indexOf name "."))
-                   name)]
+          name (if (.endsWith name ".git") (subs name 0 (.indexOf name ".")) name)]
       [uri name])))
 
 (defn dir
@@ -333,7 +332,7 @@
              (seq (map second plines))
              (vec (reverse (first xs)))
              (vec (reverse (second xs)))
-             (->> lines
+             (->> lines 
                   (drop-while #(not= % ""))
                   rest
                   (interpose "\n")
@@ -413,10 +412,10 @@
                                               id))
                                           parents)))])
         tx (cond-> tx
-                   (tempid? authorid)
+                   (tempid? authorid) 
                    (conj [:db/add authorid :email/address author])
-
-                   (and (not= committer author) (tempid? committerid))
+                   
+                   (and (not= committer author) (tempid? committerid)) 
                    (conj [:db/add committerid :email/address committer]))]
     tx))
 
@@ -428,7 +427,7 @@
                   (mapv
                    #(vector (subs % 0 40)
                             (subs % 41 (count %)))
-                   (line-seq s)))]
+                   (line-seq s)))] 
     commits))
 
 (defn unimported-commits
@@ -460,7 +459,7 @@
                   tx-ret @(d/transact conn [[:db/add temp :repo/uri repo-uri]])
                   repo (d/resolve-tempid (d/db conn) (:tempids tx-ret) temp)]
               (println "Adding repo" repo-uri)
-              repo))]
+              repo))]      
     (doseq [commit commits]
       (let [db (d/db conn)]
         (println "Importing commit:" (:sha commit))
@@ -476,7 +475,7 @@
   (doseq [a analyzers]
     (let [aname (az/keyname a)
           exts (az/extensions a)
-          srevs (set (map first (d/q '[:find ?rev :in $ ?a :where
+          srevs (set (map first (d/q '[:find ?rev :in $ ?a :where 
                                        [?tx :tx/op :schema]
                                        [?tx :tx/analyzer ?a]
                                        [?tx :tx/analyzerRev ?rev]]
@@ -485,7 +484,7 @@
       ;;install schema(s) if not yet present
       (doseq [[rev aschema] (az/schemas a)]
         (when-not (srevs rev)
-          (d/transact conn
+          (d/transact conn 
                       (conj aschema {:db/id (d/tempid :db.part/tx)
                                      :tx/op :schema
                                      :tx/analyzer aname
@@ -518,7 +517,7 @@
                         (catch Exception ex
                           (println (.getMessage ex))
                           []))]
-            (d/transact conn
+            (d/transact conn 
                         (conj adata {:db/id (d/tempid :db.part/tx)
                                      :tx/op :analyze
                                      :tx/file f
@@ -527,7 +526,7 @@
   (println "Analysis complete!"))
 
 (defn main [& [db-uri commit]]
-  (if db-uri
+  (if db-uri 
       (let [conn (ensure-db db-uri)
             [repo-uri repo-name] (get-repo-uri)]
         ;;(prn repo-uri)
@@ -563,8 +562,8 @@
 (d/q '[:find ?m :where [_ :code/text ?m] [(.contains ^String ?m "(ns ")]] db)
 (sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/def ?cn] [?cq :codeq/code ?def]] db))
 (sort (d/q '[:find ?var ?def :where [?cn :code/name ?var] [?cq :clj/ns ?cn] [?cq :codeq/code ?def]] db))
-(sort (d/q '[:find ?var ?def ?n :where
-             [?cn :code/name ?var]
+(sort (d/q '[:find ?var ?def ?n :where 
+             [?cn :code/name ?var] 
              [?cq :clj/ns ?cn]
              [?cq :codeq/file ?f]
              [?n :node/object ?f]
@@ -576,7 +575,7 @@
                 s (with-open [s (exec-stream (str \"git cat-file -p \" (:git/sha (d/entity db f))))]
                     (slurp s))
                 adata (az/analyze a db s)]
-            (d/transact conn
+            (d/transact conn 
                         (conj adata {:db/id (d/tempid :db.part/tx)
                                      :tx/op :analyze
                                      :codeq/file f
