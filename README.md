@@ -41,7 +41,7 @@ You can import more than one repo into the same db. You can re-import later afte
 You can then (or during) connect to the same db URI with a peer. Or, just start the [Datomic REST service](http://docs.datomic.com/rest.html) and poke around:
 
     cd whereverYouPutDatomicFree
-    bin/rest 8080 free datomic:free://localhost:4334/
+    bin/rest -p 8080 free datomic:free://localhost:4334/
 
 Browse to [localhost:8080](http://localhost:8080). You should see the `free` storage and the `git` db within it.
 
