@@ -31,9 +31,9 @@
           defing (and ns
                       (symbol? op)
                       (.startsWith (name op) "def"))
-          
+
           naming (let [nsym (second x)]
-                   (cond 
+                   (cond
                     ns? (str nsym)
                     defing (if (namespace nsym)
                              (str nsym)
@@ -41,26 +41,26 @@
 
           nameid (when naming (codename->id naming))
 
-          ret (cond-> ret 
+          ret (cond-> ret
                       (tempid? codeqid)
                       (conj {:db/id codeqid
                              :codeq/file f
                              :codeq/loc loc
                              :codeq/code codeid})
-                      
+
                       ns?
                       (conj [:db/add codeqid :clj/ns nameid])
 
                       defing
                       (conj [:db/add codeqid :clj/def nameid]
                             [:db/add codeqid :clj/defop (str op)])
-                      
+
                       (tempid? nameid)
                       (conj [:db/add nameid :code/name naming]))]
       [ret (assoc ctx :added added)])
     [ret ctx]))
 
-(defn analyze 
+(defn analyze
    [db f src]
    (with-open [r (clojure.lang.LineNumberingPushbackReader. (java.io.StringReader. src))]
      (let [loffs (az/line-offsets src)
