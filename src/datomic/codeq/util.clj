@@ -24,13 +24,4 @@
      (or (index-get-id db attr x)
          (d/tempid :db.part/user)))))
 
-(defmacro cond->
-  [init & steps]
-  (assert (even? (count steps)))
-  (let [g (gensym)
-        pstep (fn [[pred step]] `(if ~pred (-> ~g ~step) ~g))]
-    `(let [~g ~init
-           ~@(interleave (repeat g) (map pstep (partition 2 steps)))]
-       ~g)))
-
 (def tempid? map?)

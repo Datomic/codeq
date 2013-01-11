@@ -8,7 +8,7 @@
 
 (ns datomic.codeq.analyzers.clj
   (:require [datomic.api :as d]
-            [datomic.codeq.util :refer [cond-> index->id-fn tempid?]]
+            [datomic.codeq.util :refer [index->id-fn tempid?]]
             [datomic.codeq.analyzer :as az]))
 
 (defn analyze-1

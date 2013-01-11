@@ -11,7 +11,7 @@
             [clojure.java.io :as io]
             [clojure.set]
             [clojure.string :as string]
-            [datomic.codeq.util :refer [cond-> index->id-fn tempid?]]
+            [datomic.codeq.util :refer [index->id-fn tempid?]]
             [datomic.codeq.analyzer :as az]
             [datomic.codeq.analyzers.clj])
   (:import java.util.Date)
