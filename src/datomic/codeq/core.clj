@@ -303,8 +303,8 @@
           noff (.lastIndexOf uri "/")
           noff (if (not (pos? noff)) (.lastIndexOf uri ":") noff)
           name (subs uri (inc noff))
-          _ (assert (and (pos? (count name)) (.endsWith name ".git")) "Can't find remote origin")
-          name (subs name 0 (.indexOf name "."))]
+          _ (assert (pos? (count name)) "Can't find remote origin")
+          name (if (.endsWith name ".git") (subs name 0 (.indexOf name ".")) name)]
       [uri name])))
 
 (defn dir
