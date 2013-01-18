@@ -43,7 +43,7 @@ You can then (or during) connect to the same db URI with a peer. Or, just start 
     cd whereverYouPutDatomicFree
     bin/rest -p 8080 free datomic:free://localhost:4334/
 
-Browse to [localhost:8080](http://localhost:8080). You should see the `free` storage and the `git` db within it.
+Browse to [localhost:8080/data/](http://localhost:8080/data/). You should see the `free` storage and the `git` db within it.
 
 The [schema diagram](https://github.com/downloads/Datomic/codeq/codeq.pdf) will help you get oriented.
 
