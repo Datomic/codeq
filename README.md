@@ -50,9 +50,9 @@ The [schema diagram](https://github.com/downloads/Datomic/codeq/codeq.pdf) will 
 ## More info
 
 See the [intro blog post](http://blog.datomic.com/2012/10/codeq.html) and the [wiki](https://github.com/Datomic/codeq/wiki)
- 
+
 ## License
 
-Copyright © 2012 Metadata Partners, LLC
+Copyright © 2012 Metadata Partners, LLC and Contributors. All rights reserved.
 
 Distributed under the Eclipse Public License, the same as Clojure.
