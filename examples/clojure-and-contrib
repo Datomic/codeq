@@ -1,0 +1,52 @@
+#!/bin/bash
+
+cd `dirname $0`/..
+CODEQ_ROOT=`pwd`
+
+DATOMIC_VERSION="0.8.3767"
+DATOMIC_FILE="datomic-free-$DATOMIC_VERSION"
+DATOMIC_URL=http://downloads.datomic.com/$DATOMIC_VERSION/$DATOMIC_FILE.zip
+
+BACKUP_FILE="clojure-and-contrib"
+BACKUP_URL=http://codeq.s3.amazonaws.com/examples/$BACKUP_FILE.zip
+
+WORKING_DIR=/tmp/codeq/examples
+
+DB_URI="datomic:free://localhost:4334/clojure-and-contrib"
+
+mkdir -p $WORKING_DIR
+cd $WORKING_DIR
+
+if [ ! -d "$BACKUP_FILE" ]; then
+  wget $BACKUP_URL
+  unzip $BACKUP_FILE.zip
+fi
+
+if [ ! -d "$DATOMIC_FILE" ]; then
+  wget $DATOMIC_URL
+  unzip $DATOMIC_FILE.zip
+fi
+
+#### Restore
+
+cd $DATOMIC_FILE
+
+bin/transactor config/samples/free-transactor-template.properties &
+TRANSACTOR_PID=$!
+
+bin/datomic restore-db file:$WORKING_DIR/$BACKUP_FILE $DB_URI
+
+pkill -P $TRANSACTOR_PID
+
+#### Verify
+
+bin/transactor config/samples/free-transactor-template.properties &
+TRANSACTOR_PID=$!
+
+cd $CODEQ_ROOT
+
+sleep 5
+
+lein run -m datomic.codeq.examples.clojure-and-contrib $DB_URI
+
+pkill -P $TRANSACTOR_PID
