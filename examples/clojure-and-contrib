@@ -3,7 +3,7 @@
 cd `dirname $0`/..
 CODEQ_ROOT=`pwd`
 
-DATOMIC_VERSION="0.8.3767"
+DATOMIC_VERSION="0.8.3784"
 DATOMIC_FILE="datomic-free-$DATOMIC_VERSION"
 DATOMIC_URL=http://downloads.datomic.com/$DATOMIC_VERSION/$DATOMIC_FILE.zip
 
