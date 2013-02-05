@@ -1,6 +1,7 @@
 #!/bin/bash
 
 cd `dirname $0`/..
+CODEQ_VERSION="0.1.0-SNAPSHOT"
 CODEQ_ROOT=`pwd`
 
 DATOMIC_VERSION="0.8.3784"
@@ -14,7 +15,7 @@ DB_URI="datomic:free://localhost:4334/clojure-and-contrib"
 
 RET=0
 
-WORKING_DIR=tmp/`date +"%Y%m%d%H%M%S"`
+WORKING_DIR=tmp/examples/clojure-and-contrib
 mkdir -p $WORKING_DIR
 cd $WORKING_DIR
 WORKING_DIR=`pwd`
@@ -32,6 +33,9 @@ fi
 #### Restore
 
 cd $DATOMIC_FILE
+
+# Start with a fresh database
+rm -rf data log
 
 bin/transactor config/samples/free-transactor-template.properties &
 TRANSACTOR_PID=$!
@@ -56,6 +60,16 @@ cd $CODEQ_ROOT
 sleep 5
 
 lein run -m datomic.codeq.examples.clojure-and-contrib $DB_URI
+
+(( RET += $? ))
+
+cd $CODEQ_ROOT
+lein uberjar
+
+git clone git@github.com:clojure/clojure.git $WORKING_DIR/clojure
+cd $WORKING_DIR/clojure
+
+java -server -Xmx1g -jar $CODEQ_ROOT/target/codeq-$CODEQ_VERSION-standalone.jar $DB_URI
 
 (( RET += $? ))
 
