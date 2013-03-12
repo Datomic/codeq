@@ -64,6 +64,7 @@ lein run -m datomic.codeq.examples.clojure-and-contrib $DB_URI
 (( RET += $? ))
 
 cd $CODEQ_ROOT
+lein clean
 lein uberjar
 
 git clone git@github.com:clojure/clojure.git $WORKING_DIR/clojure
