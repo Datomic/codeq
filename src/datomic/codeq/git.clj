@@ -46,7 +46,7 @@
    efficiently skip over SHAs that are keys in the imported-commits map."
   [^Repository repo
    imported-commits
-   & rev-str]
+   rev-str]
   (let [rev-walk (RevWalk. repo)
         commit-id
         (if rev-str
