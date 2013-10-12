@@ -7,6 +7,9 @@
            org.eclipse.jgit.storage.file.FileRepositoryBuilder))
 
 
+(set! *warn-on-reflection* true)
+
+
 (defn ^Repository open-existing-repo
   "Open an exisiting git repository by
    scanning GIT_* environment variables
@@ -59,7 +62,11 @@
         (proxy [RevFilter] []
           (clone [] this)
           (include [rev-walk rev-commit]
-            (nil? (imported-commits (.getName ^RevCommit rev-commit))))
+            (let [sha (.getName ^RevCommit rev-commit)
+                  incl (nil? (imported-commits sha))]
+              (when-not incl
+                (println "Skipping commit: " sha))
+              incl))
           (requiresCommitBody [] false))]
     (seq (doto rev-walk
            (.markStart rev-commit)
@@ -85,32 +92,77 @@
      :committed (.getWhen committer)}))
 
 
-(defn lookup-rev-tree
-  "Return the RevTree object that resolves from a tree SHA id"
+(defn deep-tree-walk
+  "Walk over the entire tree of repository repo with name repo-name
+   starting from the point identitfied by tree-sha, using the function
+   tree-walker to produce transaction data.
+
+   Returns the root tree node id along with the accumulation of
+   transaction data produced by calling tree-walker on each node of
+   the tree walk.
+
+   The tree walker function is given a map
+   {:sha :type :path :filename :parent}
+   Where the :type is :tree or :blob. :parent is nil at the root of
+   the tree walk. The tree walker function must return a map
+   {:node-id :object-id :new-path :data}
+   Which contains the transaction data along with the tree node id
+   and object id for linking the node and object. Also the boolean
+   :new-path indicates if the path that the walker has processed is
+   new. If so, deep-tree-walk will step into subtrees."
   [^Repository repo
-   ^String sha]
-  (->> sha
-       (.resolve repo)
-       (.parseTree (RevWalk. repo))))
-
-
-(defn shallow-tree-walk
-  "Walks one level of a RevTree object,
-  returning the trees and blobs contained therein.
-
-  Returns [[sha (:tree OR :blob) file-name] ...]"
-  [^Repository repo
-   ^RevTree tree]
-  (let [tree-walk (doto (TreeWalk. repo)
-                    (.addTree tree)
-                    (.setRecursive false))
-        dir (transient [])]
-    (while (.next tree-walk)
-      (conj! dir
-             [(.. tree-walk (getObjectId 0) (getName))
-              (if (= (.getFileMode tree-walk 0)
-                     FileMode/TREE)
-                :tree :blob)
-              (.getNameString tree-walk)]))
-    (persistent! dir)))
-
+   repo-name
+   ^String tree-sha
+   tree-walker]
+  (let [;;resolve tree-sha to a revision tree
+        rev-tree (->> tree-sha
+                      (.resolve repo)
+                      (.parseTree (RevWalk. repo)))
+        ;;set revision tree as starting point for tree walk
+        tree-walk (doto (TreeWalk. repo) (.addTree rev-tree))
+        ;;create a root tree node from the repository name
+        {root-nodeid :node-id root-treeid :object-id new-root :new-path seed-data :data}
+        (tree-walker {:sha tree-sha :type :tree
+                      :path repo-name :filename repo-name
+                      :parent nil})]
+    (if-not new-root
+      ;;if root node is not new, then there is nothing to walk
+      [root-nodeid seed-data]
+      (loop [stack (list root-treeid)
+            depth (.getDepth tree-walk)
+            tx-data seed-data]
+       (if-not (.next tree-walk)
+         [root-nodeid tx-data]
+         (let [curr-id (.getObjectId tree-walk 0)
+               sha (.getName curr-id)
+               path (str repo-name "/" (.getPathString tree-walk))
+               filename (.getNameString tree-walk)]
+           (cond
+            ;;tree walk is pointing at a tree to step into
+            (.isSubtree tree-walk)
+            (let [{:keys [object-id data new-path]}
+                  (tree-walker {:sha sha :type :tree
+                                :path path :filename filename
+                                :parent (peek stack)})]
+              (if new-path
+                ;;enter subtree only if it's a new path
+                (do (.enterSubtree tree-walk)
+                    (recur (conj stack object-id) (.getDepth tree-walk)
+                           (into tx-data data)))
+                ;;else skip over it
+                (recur stack depth (into tx-data data))))
+            ;;depth has decrease so we must have popped out of a subtree
+            (< (.getDepth tree-walk) depth)
+            (let [new-depth (.getDepth tree-walk)
+                  new-stack (seq (drop (- depth new-depth) stack))
+                  {:keys [data]} (tree-walker {:sha sha :type :blob
+                                               :path path :filename filename
+                                               :parent (peek new-stack)})]
+              (recur new-stack new-depth (into tx-data data)))
+            ;;else continue at same depth with another blob
+            :else
+            (let [{:keys [data]}
+                  (tree-walker {:sha sha :type :blob
+                                :path path :filename filename
+                                :parent (peek stack)})]
+              (recur stack depth (into tx-data data))))))))))

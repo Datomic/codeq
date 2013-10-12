@@ -11,13 +11,12 @@
             [clojure.java.io :as io]
             [clojure.set]
             [clojure.string :as string]
-            [datomic.codeq.util :refer [index->id-fn tempid?]]
             [datomic.codeq.analyzer :as az]
             [datomic.codeq.git :as git]
             [datomic.codeq.analyzers.clj])
+  (:use datomic.codeq.util)
   (:import java.util.Date
-           org.eclipse.jgit.lib.Repository
-           org.eclipse.jgit.revwalk.RevCommit)
+           org.eclipse.jgit.lib.Repository)
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -172,6 +171,7 @@
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Git object (tree/blob) in a tree node"
+       :db/index true
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
@@ -259,77 +259,121 @@
       @(d/transact conn schema)))
 
 
-(defn commit-tx-data
-  [db repo repoid repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
-  (let [tempid? map? ;;todo - better pred
-        sha->id (index->id-fn db :git/sha)
+(defn authors-tx-data
+  [db {:keys [author committer]}]
+  (let [tempid? map?
         email->id (index->id-fn db :email/address)
-        filename->id (index->id-fn db :file/name)
         authorid (email->id author)
         committerid (email->id committer)
-        cid (d/tempid :db.part/user)
-        tx-data (fn f [inpath [sha type filename]]
-                  (let [path (str inpath filename)
-                        id (sha->id sha)
-                        filenameid (filename->id filename)
-                        pathid (filename->id path)
-                        nodeid (or (and (not (tempid? id))
-                                        (not (tempid? filenameid))
-                                        (ffirst (d/q '[:find ?e :in $ ?filename ?id
-                                                       :where [?e :node/filename ?filename] [?e :node/object ?id]]
-                                                     db filenameid id)))
-                                   (d/tempid :db.part/user))
-                        newpath (or (tempid? pathid) (tempid? nodeid)
-                                    (not (ffirst (d/q '[:find ?node :in $ ?path
-                                                        :where [?node :node/paths ?path]]
-                                                      db pathid))))
-                        data (cond-> []
-                                     (tempid? filenameid) (conj [:db/add filenameid :file/name filename])
-                                     (tempid? pathid) (conj [:db/add pathid :file/name path])
-                                     (tempid? nodeid) (conj {:db/id nodeid :node/filename filenameid :node/object id})
-                                     newpath (conj [:db/add nodeid :node/paths pathid])
-                                     (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
-                        data (if (and newpath (= type :tree))
-                               (let [rev-tree (git/lookup-rev-tree repo sha)
-                                     es (git/shallow-tree-walk repo rev-tree)]
-                                 (reduce (fn [data child]
-                                           (let [[cid cdata] (f (str path "/") child)
-                                                 data (into data cdata)]
-                                             (cond-> data
-                                                     (tempid? id) (conj [:db/add id :tree/nodes cid]))))
-                                         data es))
-                               data)]
-                    [nodeid data]))
-        [treeid treedata] (tx-data nil [tree :tree repo-name])
-        tx (into treedata
-                 [[:db/add repoid :repo/commits cid]
-                  {:db/id (d/tempid :db.part/tx)
-                   :tx/commit cid
-                   :tx/op :import}
-                  (cond-> {:db/id cid
-                           :git/type :commit
-                           :commit/tree treeid
-                           :git/sha sha
-                           :commit/author authorid
-                           :commit/authoredAt authored
-                           :commit/committer committerid
-                           :commit/committedAt committed
-                           }
-                          msg (assoc :commit/message msg)
-                          parents (assoc :commit/parents
-                                    (mapv (fn [p]
-                                            (let [id (sha->id p)]
-                                              (assert (not (tempid? id))
-                                                      (str "Parent " p " not previously imported"))
-                                              id))
-                                          parents)))])
-        tx (cond-> tx
-                   (tempid? authorid)
-                   (conj [:db/add authorid :email/address author])
+        tx-data (cond-> []
+                        ;;record author's email if new
+                        (tempid? authorid)
+                        (conj [:db/add authorid :email/address author])
+                        ;;record committer's email if new and is
+                        ;;distinct from the author's email
+                        (and (not= committer author) (tempid? committerid))
+                        (conj [:db/add committerid :email/address committer]))]
+    [authorid committerid tx-data]))
 
-                   (and (not= committer author) (tempid? committerid))
-                   (conj [:db/add committerid :email/address committer]))]
-    tx))
+
+(defn commit-node-tx-data
+  [db repoid root-nodeid {:keys [sha msg parents authored committed] :as commit}]
+  (let [commitid (d/tempid :db.part/user)
+        [authorid committerid author-tx-data] (authors-tx-data db commit)]
+    (into author-tx-data
+          [[:db/add repoid :repo/commits commitid]
+           {:db/id (d/tempid :db.part/tx)
+            :tx/commit commitid
+            :tx/op :import}
+           (cond-> {:db/id commitid
+                    :git/type :commit
+                    :commit/tree root-nodeid
+                    :git/sha sha
+                    :commit/author authorid
+                    :commit/authoredAt authored
+                    :commit/committer committerid
+                    :commit/committedAt committed}
+                   msg
+                   (assoc :commit/message msg)
+                   parents
+                   (assoc :commit/parents
+                     (mapv (fn [p]
+                             (if-let [id (index-get-id db :git/sha p)]
+                               id
+                               (throw (ex-info "Parent not previously imported"
+                                               {:sha sha :parent p}))))
+                           parents)))])))
+
+
+(defn commit-tx-data
+  [db repo repoid repo-name {:keys [sha msg tree parents authored committed] :as commit}]
+  (let [tempid? map? ;;todo - better pred
+        sha->id (index->id-fn db :git/sha)
+        filename->id (index->id-fn db :file/name)
+        commitid (d/tempid :db.part/user)
+        ;;find a node by object and filename id
+        check-for-node
+        (fn [object-id filename-id]
+          (some #(let [{eid :e} %]
+                   (if (seq (d/datoms db :eavt eid :node/filename filename-id))
+                     eid))
+                (d/datoms db :avet :node/object object-id)))
+
+        walker-fn
+        (fn [{:keys [sha type path filename parent]}]
+          (let [;;lookup id for file/tree object by tree sha
+                objid (sha->id sha)
+                ;;lookup id for file name
+                filenameid (filename->id filename)
+                ;;lookup id for complete path
+                pathid (filename->id path)
+                ;;lookup id for tree node
+                ;;new if either tree sha or filename are new
+                ;;i.e. file with new content
+                nodeid (or (and (not (tempid? objid))
+                                (not (tempid? filenameid))
+                                (check-for-node objid filenameid))
+                           (d/tempid :db.part/user))
+                ;;path is new if: 1. path name is new, or 2. path name
+                ;;exists but tree node is new (file name and sha are
+                ;;unique), or 3. path name and tree node both exist
+                ;;but the former is not already a path of the latter.
+                newpath (or (tempid? pathid) (tempid? nodeid)
+                            (every? #(not= nodeid (:e %))
+                                    (d/datoms db :vaet pathid :node/paths)))
+                data (cond->
+                      []
+                      ;;record file name if new
+                      (tempid? filenameid)
+                      (conj [:db/add filenameid :file/name filename])
+                      ;;record path name if new
+                      (tempid? pathid)
+                      (conj [:db/add pathid :file/name path])
+                      ;;record tree node if new
+                      (tempid? nodeid)
+                      (conj {:db/id nodeid
+                             :node/filename filenameid
+                             :node/object objid})
+                      ;;link tree node to new paths
+                      newpath
+                      (conj [:db/add nodeid :node/paths pathid])
+                      ;;link new tree node to parent
+                      (and (tempid? nodeid) parent)
+                      (conj [:db/add parent :tree/nodes nodeid])
+                      ;;record the sha of file/tree objects
+                      (tempid? objid)
+                      (conj {:db/id objid :git/sha sha :git/type type}))]
+            ;;emit the tree node, its object,
+            ;;and the accumulated tx data
+            ;;indicating if the tree node is new
+            {:node-id nodeid
+             :object-id objid
+             :new-path newpath
+             :data data}))
+
+        [root-nodeid treedata] (git/deep-tree-walk repo repo-name tree walker-fn)]
+    (into treedata
+          (commit-node-tx-data db repoid root-nodeid commit))))
 
 
 (defn unimported-commits
@@ -367,7 +411,7 @@
     (doseq [commit commits]
       (let [db (d/db conn)]
         (println "Importing commit:" (:sha commit))
-        (d/transact conn (commit-tx-data db repo repoid repo-name commit))))
+        @(d/transact conn (commit-tx-data db repo repoid repo-name commit))))
     (d/request-index conn)
     (println "Import complete!")))
 
