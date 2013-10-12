@@ -171,7 +171,6 @@
        :db/valueType :db.type/ref
        :db/cardinality :db.cardinality/one
        :db/doc "Git object (tree/blob) in a tree node"
-       :db/index true
        :db.install/_attribute :db.part/db}
 
       {:db/id #db/id[:db.part/db]
@@ -317,7 +316,7 @@
           (some #(let [{eid :e} %]
                    (if (seq (d/datoms db :eavt eid :node/filename filename-id))
                      eid))
-                (d/datoms db :avet :node/object object-id)))
+                (d/datoms db :vaet object-id :node/object)))
 
         walker-fn
         (fn [{:keys [sha type path filename parent]}]
