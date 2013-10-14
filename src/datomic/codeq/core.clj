@@ -11,10 +11,12 @@
             [clojure.java.io :as io]
             [clojure.set]
             [clojure.string :as string]
-            [datomic.codeq.util :refer [index->id-fn tempid?]]
             [datomic.codeq.analyzer :as az]
+            [datomic.codeq.git :as git]
             [datomic.codeq.analyzers.clj])
-  (:import java.util.Date)
+  (:use datomic.codeq.util)
+  (:import java.util.Date
+           org.eclipse.jgit.lib.Repository)
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -250,188 +252,131 @@
        :db.install/_attribute :db.part/db}
       ])
 
-(defn ^java.io.Reader exec-stream
-  [^String cmd]
-  (-> (Runtime/getRuntime)
-      (.exec cmd)
-      .getInputStream
-      io/reader))
 
 (defn ensure-schema [conn]
   (or (-> conn d/db (d/entid :tx/commit))
       @(d/transact conn schema)))
 
-;;example commit - git cat-file -p
-;;tree d81cd432f2050c84a3d742caa35ccb8298d51e9d
-;;author Rich Hickey <richhickey@gmail.com> 1348842448 -0400
-;;committer Rich Hickey <richhickey@gmail.com> 1348842448 -0400
 
-;; or
+(defn authors-tx-data
+  [db {:keys [author committer]}]
+  (let [tempid? map?
+        email->id (index->id-fn db :email/address)
+        authorid (email->id author)
+        committerid (email->id committer)
+        tx-data (cond-> []
+                        ;;record author's email if new
+                        (tempid? authorid)
+                        (conj [:db/add authorid :email/address author])
+                        ;;record committer's email if new and is
+                        ;;distinct from the author's email
+                        (and (not= committer author) (tempid? committerid))
+                        (conj [:db/add committerid :email/address committer]))]
+    [authorid committerid tx-data]))
 
-;;tree ba63180c1d120b469b275aef5da479ab6c3e2afd
-;;parent c3bd979cfe65da35253b25cb62aad4271430405c
-;;maybe more parents
-;;author Rich Hickey <richhickey@gmail.com> 1348869325 -0400
-;;committer Rich Hickey <richhickey@gmail.com> 1348869325 -0400
-;;then blank line
-;;then commit message
 
-
-;;example tree
-;;100644 blob ee508f768d92ba23e66c4badedd46aa216963ee1	.gitignore
-;;100644 blob b60ea231eb47eb98395237df17550dee9b38fb72	README.md
-;;040000 tree bcfca612efa4ff65b3eb07f6889ebf73afb0e288	doc
-;;100644 blob 813c07d8cd27226ddd146ddd1d27fdbde10071eb	epl-v10.html
-;;100644 blob f8b5a769bcc74ee35b9a8becbbe49d4904ab8abe	project.clj
-;;040000 tree 6b880666740300ac57361d5aee1a90488ba1305c	src
-;;040000 tree 407924e4812c72c880b011b5a1e0b9cb4eb68cfa	test
-
-;; example git remote origin
-;;RichMacPro:codeq rich$ git remote show -n origin
-;;* remote origin
-;;  Fetch URL: https://github.com/Datomic/codeq.git
-;;  Push  URL: https://github.com/Datomic/codeq.git
-;;  HEAD branch: (not queried)
-
-(defn get-repo-uri
-  "returns [uri name]"
-  []
-  (with-open [s (exec-stream (str "git remote show -n origin"))]
-    (let [es (line-seq s)
-          ^String line (second es)
-          uri (subs line (inc (.lastIndexOf line " ")))
-          noff (.lastIndexOf uri "/")
-          noff (if (not (pos? noff)) (.lastIndexOf uri ":") noff)
-          name (subs uri (inc noff))
-          _ (assert (pos? (count name)) "Can't find remote origin")
-          name (if (.endsWith name ".git") (subs name 0 (.indexOf name ".")) name)]
-      [uri name])))
-
-(defn dir
-  "Returns [[sha :type filename] ...]"
-  [tree]
-  (with-open [s (exec-stream (str "git cat-file -p " tree))]
-    (let [es (line-seq s)]
-      (mapv #(let [ss (string/split ^String % #"\s")]
-               [(nth ss 2)
-                (keyword (nth ss 1))
-                (subs % (inc (.indexOf ^String % "\t")) (count %))])
-            es))))
-
-(defn commit
-  [[sha _]]
-  (let [trim-email (fn [s] (subs s 1 (dec (count s))))
-        dt (fn [ds] (Date. (* 1000 (Integer/parseInt ds))))
-        [tree parents author committer msg]
-        (with-open [s (exec-stream (str "git cat-file -p " sha))]
-          (let [lines (line-seq s)
-                slines (mapv #(string/split % #"\s") lines)
-                tree (-> slines (nth 0) (nth 1))
-                [plines xs] (split-with #(= (nth % 0) "parent") (rest slines))]
-            [tree
-             (seq (map second plines))
-             (vec (reverse (first xs)))
-             (vec (reverse (second xs)))
-             (->> lines
-                  (drop-while #(not= % ""))
-                  rest
-                  (interpose "\n")
-                  (apply str))]))]
-    {:sha sha
-     :msg msg
-     :tree tree
-     :parents parents
-     :author (trim-email (author 2))
-     :authored (dt (author 1))
-     :committer (trim-email (committer 2))
-     :committed (dt (committer 1))}))
-
+(defn commit-node-tx-data
+  [db repoid root-nodeid {:keys [sha msg parents authored committed] :as commit}]
+  (let [commitid (d/tempid :db.part/user)
+        [authorid committerid author-tx-data] (authors-tx-data db commit)]
+    (into author-tx-data
+          [[:db/add repoid :repo/commits commitid]
+           {:db/id (d/tempid :db.part/tx)
+            :tx/commit commitid
+            :tx/op :import}
+           (cond-> {:db/id commitid
+                    :git/type :commit
+                    :commit/tree root-nodeid
+                    :git/sha sha
+                    :commit/author authorid
+                    :commit/authoredAt authored
+                    :commit/committer committerid
+                    :commit/committedAt committed}
+                   msg
+                   (assoc :commit/message msg)
+                   parents
+                   (assoc :commit/parents
+                     (mapv (fn [p]
+                             (if-let [id (index-get-id db :git/sha p)]
+                               id
+                               (throw (ex-info "Parent not previously imported"
+                                               {:sha sha :parent p}))))
+                           parents)))])))
 
 
 (defn commit-tx-data
-  [db repo repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
+  [db repo repoid repo-name {:keys [sha msg tree parents authored committed] :as commit}]
   (let [tempid? map? ;;todo - better pred
         sha->id (index->id-fn db :git/sha)
-        email->id (index->id-fn db :email/address)
         filename->id (index->id-fn db :file/name)
-        authorid (email->id author)
-        committerid (email->id committer)
-        cid (d/tempid :db.part/user)
-        tx-data (fn f [inpath [sha type filename]]
-                  (let [path (str inpath filename)
-                        id (sha->id sha)
-                        filenameid (filename->id filename)
-                        pathid (filename->id path)
-                        nodeid (or (and (not (tempid? id))
-                                        (not (tempid? filenameid))
-                                        (ffirst (d/q '[:find ?e :in $ ?filename ?id
-                                                       :where [?e :node/filename ?filename] [?e :node/object ?id]]
-                                                     db filenameid id)))
-                                   (d/tempid :db.part/user))
-                        newpath (or (tempid? pathid) (tempid? nodeid)
-                                    (not (ffirst (d/q '[:find ?node :in $ ?path
-                                                        :where [?node :node/paths ?path]]
-                                                      db pathid))))
-                        data (cond-> []
-                                     (tempid? filenameid) (conj [:db/add filenameid :file/name filename])
-                                     (tempid? pathid) (conj [:db/add pathid :file/name path])
-                                     (tempid? nodeid) (conj {:db/id nodeid :node/filename filenameid :node/object id})
-                                     newpath (conj [:db/add nodeid :node/paths pathid])
-                                     (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
-                        data (if (and newpath (= type :tree))
-                               (let [es (dir sha)]
-                                 (reduce (fn [data child]
-                                           (let [[cid cdata] (f (str path "/") child)
-                                                 data (into data cdata)]
-                                             (cond-> data
-                                                     (tempid? id) (conj [:db/add id :tree/nodes cid]))))
-                                         data es))
-                               data)]
-                    [nodeid data]))
-        [treeid treedata] (tx-data nil [tree :tree repo-name])
-        tx (into treedata
-                 [[:db/add repo :repo/commits cid]
-                  {:db/id (d/tempid :db.part/tx)
-                   :tx/commit cid
-                   :tx/op :import}
-                  (cond-> {:db/id cid
-                           :git/type :commit
-                           :commit/tree treeid
-                           :git/sha sha
-                           :commit/author authorid
-                           :commit/authoredAt authored
-                           :commit/committer committerid
-                           :commit/committedAt committed
-                           }
-                          msg (assoc :commit/message msg)
-                          parents (assoc :commit/parents
-                                    (mapv (fn [p]
-                                            (let [id (sha->id p)]
-                                              (assert (not (tempid? id))
-                                                      (str "Parent " p " not previously imported"))
-                                              id))
-                                          parents)))])
-        tx (cond-> tx
-                   (tempid? authorid)
-                   (conj [:db/add authorid :email/address author])
+        commitid (d/tempid :db.part/user)
+        ;;find a node by object and filename id
+        check-for-node
+        (fn [object-id filename-id]
+          (some #(let [{eid :e} %]
+                   (if (seq (d/datoms db :eavt eid :node/filename filename-id))
+                     eid))
+                (d/datoms db :vaet object-id :node/object)))
 
-                   (and (not= committer author) (tempid? committerid))
-                   (conj [:db/add committerid :email/address committer]))]
-    tx))
+        walker-fn
+        (fn [{:keys [sha type path filename parent]}]
+          (let [;;lookup id for file/tree object by tree sha
+                objid (sha->id sha)
+                ;;lookup id for file name
+                filenameid (filename->id filename)
+                ;;lookup id for complete path
+                pathid (filename->id path)
+                ;;lookup id for tree node
+                ;;new if either tree sha or filename are new
+                ;;i.e. file with new content
+                nodeid (or (and (not (tempid? objid))
+                                (not (tempid? filenameid))
+                                (check-for-node objid filenameid))
+                           (d/tempid :db.part/user))
+                ;;path is new if: 1. path name is new, or 2. path name
+                ;;exists but tree node is new (file name and sha are
+                ;;unique), or 3. path name and tree node both exist
+                ;;but the former is not already a path of the latter.
+                newpath (or (tempid? pathid) (tempid? nodeid)
+                            (every? #(not= nodeid (:e %))
+                                    (d/datoms db :vaet pathid :node/paths)))
+                data (cond->
+                      []
+                      ;;record file name if new
+                      (tempid? filenameid)
+                      (conj [:db/add filenameid :file/name filename])
+                      ;;record path name if new
+                      (tempid? pathid)
+                      (conj [:db/add pathid :file/name path])
+                      ;;record tree node if new
+                      (tempid? nodeid)
+                      (conj {:db/id nodeid
+                             :node/filename filenameid
+                             :node/object objid})
+                      ;;link tree node to new paths
+                      newpath
+                      (conj [:db/add nodeid :node/paths pathid])
+                      ;;link new tree node to parent
+                      (and (tempid? nodeid) parent)
+                      (conj [:db/add parent :tree/nodes nodeid])
+                      ;;record the sha of file/tree objects
+                      (tempid? objid)
+                      (conj {:db/id objid :git/sha sha :git/type type}))]
+            ;;emit the tree node, its object,
+            ;;and the accumulated tx data
+            ;;indicating if the tree node is new
+            {:node-id nodeid
+             :object-id objid
+             :new-path newpath
+             :data data}))
 
-(defn commits
-  "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
-  or any acceptable commit name arg for git log"
-  [commit-name]
-  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse " commit-name))]
-                  (mapv
-                   #(vector (subs % 0 40)
-                            (subs % 41 (count %)))
-                   (line-seq s)))]
-    commits))
+        [root-nodeid treedata] (git/deep-tree-walk repo repo-name tree walker-fn)]
+    (into treedata
+          (commit-node-tx-data db repoid root-nodeid commit))))
+
 
 (defn unimported-commits
-  [db commit-name]
+  [db repo commit-name]
   (let [imported (into {}
                        (d/q '[:find ?sha ?e
                               :where
@@ -439,7 +384,8 @@
                               [?tx :tx/commit ?e]
                               [?e :git/sha ?sha]]
                             db))]
-    (pmap commit (remove (fn [[sha _]] (imported sha)) (commits commit-name)))))
+    (pmap git/extract-commit-info
+          (git/walk-all-commits repo imported commit-name))))
 
 
 (defn ensure-db [db-uri]
@@ -449,28 +395,29 @@
     conn))
 
 (defn import-git
-  [conn repo-uri repo-name commits]
+  [conn repo commits]
   ;;todo - add already existing commits to new repo if it includes them
-  (println "Importing repo:" repo-uri "as:" repo-name)
   (let [db (d/db conn)
-        repo
+        [repo-uri repo-name] (git/get-origin-uri repo)
+        repoid
         (or (ffirst (d/q '[:find ?e :in $ ?uri :where [?e :repo/uri ?uri]] db repo-uri))
             (let [temp (d/tempid :db.part/user)
                   tx-ret @(d/transact conn [[:db/add temp :repo/uri repo-uri]])
-                  repo (d/resolve-tempid (d/db conn) (:tempids tx-ret) temp)]
+                  repoid (d/resolve-tempid (d/db conn) (:tempids tx-ret) temp)]
               (println "Adding repo" repo-uri)
-              repo))]
+              repoid))]
+    (println "Importing repo:" repo-uri "as:" repo-name)
     (doseq [commit commits]
       (let [db (d/db conn)]
         (println "Importing commit:" (:sha commit))
-        (d/transact conn (commit-tx-data db repo repo-name commit))))
+        @(d/transact conn (commit-tx-data db repo repoid repo-name commit))))
     (d/request-index conn)
     (println "Import complete!")))
 
 (def analyzers [(datomic.codeq.analyzers.clj/impl)])
 
 (defn run-analyzers
-  [conn]
+  [conn repo]
   (println "Analyzing...")
   (doseq [a analyzers]
     (let [aname (az/keyname a)
@@ -510,8 +457,13 @@
           ;;analyze them
           (println "analyzing file:" f " - sha: " (:git/sha (d/entity db f)))
           (let [db (d/db conn)
-                src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
-                      (slurp s))
+                rawBytes (->> f
+                              (d/entity db)
+                              :git/sha
+                              (.resolve ^Repository repo)
+                              (.open ^Repository repo)
+                              (.getBytes))
+                src (String. rawBytes "UTF-8")
                 adata (try
                         (az/analyze a db f src)
                         (catch Exception ex
@@ -527,12 +479,11 @@
 
 (defn main [& [db-uri commit]]
   (if db-uri
-      (let [conn (ensure-db db-uri)
-            [repo-uri repo-name] (get-repo-uri)]
-        ;;(prn repo-uri)
-        (import-git conn repo-uri repo-name (unimported-commits (d/db conn) commit))
-        (run-analyzers conn))
-      (println "Usage: datomic.codeq.core db-uri [commit-name]")))
+    (let [conn (ensure-db db-uri)]
+      (with-open [repo (git/open-existing-repo)]
+       (import-git conn repo (unimported-commits (d/db conn) repo commit))
+       (run-analyzers conn repo)))
+    (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
 (defn -main
   [& args]
@@ -572,8 +523,13 @@
           ;;analyze them
           (println \"analyzing file:\" f)
           (let [db (d/db conn)
-                s (with-open [s (exec-stream (str \"git cat-file -p \" (:git/sha (d/entity db f))))]
-                    (slurp s))
+               rawBytes (->> f
+                             (d/entity db)
+                             :git/sha
+                             (.resolve repo)
+                             (.open repo)
+                             (.getBytes))
+                src (String. rawBytes \"UTF-8\")
                 adata (az/analyze a db s)]
             (d/transact conn
                         (conj adata {:db/id (d/tempid :db.part/tx)
