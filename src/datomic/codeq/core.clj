@@ -319,7 +319,7 @@
             es))))
 
 (defn commit
-  [[sha _]]
+  [sha]
   (let [trim-email (fn [s] (subs s 1 (dec (count s))))
         dt (fn [ds] (Date. (* 1000 (Integer/parseInt ds))))
         [tree parents author committer msg]
@@ -420,14 +420,11 @@
     tx))
 
 (defn commits
-  "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
+  "Returns log as [sha ...], in commit order. commit-name may be nil
   or any acceptable commit name arg for git log"
   [commit-name]
-  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse " commit-name))]
-                  (mapv
-                   #(vector (subs % 0 40)
-                            (subs % 41 (count %)))
-                   (line-seq s)))]
+  (let [commits (with-open [s (exec-stream (str "git log --pretty=format:%H --date-order --reverse " commit-name))]
+                  (mapv identity (line-seq s)))]
     commits))
 
 (defn unimported-commits
@@ -439,7 +436,7 @@
                               [?tx :tx/commit ?e]
                               [?e :git/sha ?sha]]
                             db))]
-    (pmap commit (remove (fn [[sha _]] (imported sha)) (commits commit-name)))))
+    (pmap commit (remove (fn [sha] (imported sha)) (commits commit-name)))))
 
 
 (defn ensure-db [db-uri]
