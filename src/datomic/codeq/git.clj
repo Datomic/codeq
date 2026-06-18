@@ -53,6 +53,27 @@
               (iterator-seq (.iterator walk))))
       (finally (.close walk)))))
 
+(defn- mode->type [^FileMode m]
+  (cond
+    (= m FileMode/TREE)    :tree
+    (= m FileMode/GITLINK) :commit
+    :else                  :blob))
+
+(defn tree-entries
+  "[[sha :type filename] ...] for the direct children of tree-sha, in git tree order."
+  [^Repository repo ^String tree-sha]
+  (let [tw (doto (TreeWalk. repo)
+             (.addTree (ObjectId/fromString tree-sha))
+             (.setRecursive false))]
+    (try
+      (loop [acc []]
+        (if (.next tw)
+          (recur (conj acc [(.name (.getObjectId tw 0))
+                            (mode->type (.getFileMode tw 0))
+                            (.getNameString tw)]))
+          acc))
+      (finally (.close tw)))))
+
 (defn commit-info
   "Map of commit fields for the 40-char hex sha."
   [^Repository repo ^String sha]
