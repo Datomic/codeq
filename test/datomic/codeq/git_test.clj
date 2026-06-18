@@ -49,3 +49,28 @@
               blob-sha (.name (.getObjectId tw 0))]
           (.close tw)
           (is (= "hello world\n" (git/blob-text repo blob-sha))))))))
+
+(deftest commit-info-parses-fields
+  (testing "commit-info returns author email, message, tree, and parents"
+    (with-temp-repo
+      (fn [dir git ^Repository repo]
+        (let [c1 (commit-file! git dir "a.txt" "one\n" "first")
+              c2 (commit-file! git dir "b.txt" "two\n" "second")
+              info1 (git/commit-info repo (.name c1))
+              info2 (git/commit-info repo (.name c2))]
+          (is (= (.name c1) (:sha info1)))
+          (is (= "first" (:msg info1)))
+          (is (= "ada@example.com" (:author info1)))
+          (is (= "ada@example.com" (:committer info1)))
+          (is (instance? java.util.Date (:authored info1)))
+          (is (nil? (:parents info1)))
+          (is (= [(.name c1)] (vec (:parents info2)))))))))
+
+(deftest commit-shas-orders-parents-first
+  (testing "commit-shas returns commits parents-before-children"
+    (with-temp-repo
+      (fn [dir git ^Repository repo]
+        (let [c1 (commit-file! git dir "a.txt" "one\n" "first")
+              c2 (commit-file! git dir "a.txt" "one\ntwo\n" "second")
+              shas (mapv first (git/commit-shas repo nil))]
+          (is (= [(.name c1) (.name c2)] shas)))))))
