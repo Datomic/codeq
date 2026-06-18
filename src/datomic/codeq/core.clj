@@ -8,13 +8,12 @@
 
 (ns datomic.codeq.core
   (:require [datomic.api :as d]
-            [clojure.java.io :as io]
             [clojure.set]
             [clojure.string :as string]
             [datomic.codeq.util :refer [index->id-fn tempid?]]
+            [datomic.codeq.git :as git]
             [datomic.codeq.analyzer :as az]
             [datomic.codeq.analyzers.clj])
-  (:import java.util.Date)
   (:gen-class))
 
 (set! *warn-on-reflection* true)
@@ -250,13 +249,6 @@
        :db.install/_attribute :db.part/db}
       ])
 
-(defn ^java.io.Reader exec-stream
-  [^String cmd]
-  (-> (Runtime/getRuntime)
-      (.exec cmd)
-      .getInputStream
-      io/reader))
-
 (defn ensure-schema [conn]
   (or (-> conn d/db (d/entid :tx/commit))
       @(d/transact conn schema)))
@@ -293,63 +285,11 @@
 ;;  Push  URL: https://github.com/Datomic/codeq.git
 ;;  HEAD branch: (not queried)
 
-(defn get-repo-uri
-  "returns [uri name]"
-  []
-  (with-open [s (exec-stream (str "git remote show -n origin"))]
-    (let [es (line-seq s)
-          ^String line (second es)
-          uri (subs line (inc (.lastIndexOf line " ")))
-          noff (.lastIndexOf uri "/")
-          noff (if (not (pos? noff)) (.lastIndexOf uri ":") noff)
-          name (subs uri (inc noff))
-          _ (assert (pos? (count name)) "Can't find remote origin")
-          name (if (.endsWith name ".git") (subs name 0 (.indexOf name ".")) name)]
-      [uri name])))
-
-(defn dir
-  "Returns [[sha :type filename] ...]"
-  [tree]
-  (with-open [s (exec-stream (str "git cat-file -p " tree))]
-    (let [es (line-seq s)]
-      (mapv #(let [ss (string/split ^String % #"\s")]
-               [(nth ss 2)
-                (keyword (nth ss 1))
-                (subs % (inc (.indexOf ^String % "\t")) (count %))])
-            es))))
-
-(defn commit
-  [[sha _]]
-  (let [trim-email (fn [s] (subs s 1 (dec (count s))))
-        dt (fn [ds] (Date. (* 1000 (Integer/parseInt ds))))
-        [tree parents author committer msg]
-        (with-open [s (exec-stream (str "git cat-file -p " sha))]
-          (let [lines (line-seq s)
-                slines (mapv #(string/split % #"\s") lines)
-                tree (-> slines (nth 0) (nth 1))
-                [plines xs] (split-with #(= (nth % 0) "parent") (rest slines))]
-            [tree
-             (seq (map second plines))
-             (vec (reverse (first xs)))
-             (vec (reverse (second xs)))
-             (->> lines
-                  (drop-while #(not= % ""))
-                  rest
-                  (interpose "\n")
-                  (apply str))]))]
-    {:sha sha
-     :msg msg
-     :tree tree
-     :parents parents
-     :author (trim-email (author 2))
-     :authored (dt (author 1))
-     :committer (trim-email (committer 2))
-     :committed (dt (committer 1))}))
 
 
 
 (defn commit-tx-data
-  [db repo repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
+  [grepo db repo repo-name {:keys [sha msg tree parents author authored committer committed] :as commit}]
   (let [tempid? map? ;;todo - better pred
         sha->id (index->id-fn db :git/sha)
         email->id (index->id-fn db :email/address)
@@ -379,7 +319,7 @@
                                      newpath (conj [:db/add nodeid :node/paths pathid])
                                      (tempid? id) (conj {:db/id id :git/sha sha :git/type type}))
                         data (if (and newpath (= type :tree))
-                               (let [es (dir sha)]
+                               (let [es (git/tree-entries grepo sha)]
                                  (reduce (fn [data child]
                                            (let [[cid cdata] (f (str path "/") child)
                                                  data (into data cdata)]
@@ -419,19 +359,8 @@
                    (conj [:db/add committerid :email/address committer]))]
     tx))
 
-(defn commits
-  "Returns log as [[sha msg] ...], in commit order. commit-name may be nil
-  or any acceptable commit name arg for git log"
-  [commit-name]
-  (let [commits (with-open [s (exec-stream (str "git log --pretty=oneline --date-order --reverse " commit-name))]
-                  (mapv
-                   #(vector (subs % 0 40)
-                            (subs % 41 (count %)))
-                   (line-seq s)))]
-    commits))
-
 (defn unimported-commits
-  [db commit-name]
+  [grepo db commit-name]
   (let [imported (into {}
                        (d/q '[:find ?sha ?e
                               :where
@@ -439,7 +368,8 @@
                               [?tx :tx/commit ?e]
                               [?e :git/sha ?sha]]
                             db))]
-    (pmap commit (remove (fn [[sha _]] (imported sha)) (commits commit-name)))))
+    (map (fn [[sha _]] (git/commit-info grepo sha))
+         (remove (fn [[sha _]] (imported sha)) (git/commit-shas grepo commit-name)))))
 
 
 (defn ensure-db [db-uri]
@@ -449,7 +379,7 @@
     conn))
 
 (defn import-git
-  [conn repo-uri repo-name commits]
+  [grepo conn repo-uri repo-name commits]
   ;;todo - add already existing commits to new repo if it includes them
   (println "Importing repo:" repo-uri "as:" repo-name)
   (let [db (d/db conn)
@@ -463,14 +393,14 @@
     (doseq [commit commits]
       (let [db (d/db conn)]
         (println "Importing commit:" (:sha commit))
-        (d/transact conn (commit-tx-data db repo repo-name commit))))
+        (d/transact conn (commit-tx-data grepo db repo repo-name commit))))
     (d/request-index conn)
     (println "Import complete!")))
 
 (def analyzers [(datomic.codeq.analyzers.clj/impl)])
 
 (defn run-analyzers
-  [conn]
+  [grepo conn]
   (println "Analyzing...")
   (doseq [a analyzers]
     (let [aname (az/keyname a)
@@ -510,8 +440,7 @@
           ;;analyze them
           (println "analyzing file:" f " - sha: " (:git/sha (d/entity db f)))
           (let [db (d/db conn)
-                src (with-open [s (exec-stream (str "git cat-file -p " (:git/sha (d/entity db f))))]
-                      (slurp s))
+                src (git/blob-text grepo (:git/sha (d/entity db f)))
                 adata (try
                         (az/analyze a db f src)
                         (catch Exception ex
@@ -527,12 +456,13 @@
 
 (defn main [& [db-uri commit]]
   (if db-uri
+    (with-open [grepo (git/open-repo)]
       (let [conn (ensure-db db-uri)
-            [repo-uri repo-name] (get-repo-uri)]
-        ;;(prn repo-uri)
-        (import-git conn repo-uri repo-name (unimported-commits (d/db conn) commit))
-        (run-analyzers conn))
-      (println "Usage: datomic.codeq.core db-uri [commit-name]")))
+            [repo-uri repo-name] (git/repo-uri grepo)]
+        (import-git grepo conn repo-uri repo-name
+                    (unimported-commits grepo (d/db conn) commit))
+        (run-analyzers grepo conn)))
+    (println "Usage: datomic.codeq.core db-uri [commit-name]")))
 
 (defn -main
   [& args]
