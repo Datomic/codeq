@@ -1,7 +1,8 @@
 {:paths ["src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.1"}
         com.datomic/peer {:mvn/version "1.0.7469"
-                          :exclusions [org.clojure/clojure]}}
+                          :exclusions [org.clojure/clojure]}
+        org.eclipse.jgit/org.eclipse.jgit {:mvn/version "6.10.0.202406032230-r"}}
  :aliases
  {:run  {:main-opts ["-m" "datomic.codeq.core"]}
   :test {:extra-paths ["test"]
