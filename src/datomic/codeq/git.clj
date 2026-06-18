@@ -35,39 +35,3 @@
       (let [loader (.open reader (ObjectId/fromString sha))]
         (String. (.getBytes loader) StandardCharsets/UTF_8))
       (finally (.close reader)))))
-
-(defn commit-shas
-  "[[sha short-message] ...] in import order (parents before children).
-   rev nil => HEAD."
-  [^Repository repo rev]
-  (let [walk (RevWalk. repo)]
-    (try
-      (let [start (.resolve repo (or rev Constants/HEAD))]
-        (when (nil? start)
-          (throw (ex-info (str "Could not resolve rev: " (or rev "HEAD"))
-                          {:rev rev})))
-        (.markStart walk (.parseCommit walk start))
-        (.sort walk RevSort/TOPO)
-        (.sort walk RevSort/REVERSE true)
-        (mapv (fn [^RevCommit c] [(.name c) (.getShortMessage c)])
-              (iterator-seq (.iterator walk))))
-      (finally (.close walk)))))
-
-(defn commit-info
-  "Map of commit fields for the 40-char hex sha."
-  [^Repository repo ^String sha]
-  (let [walk (RevWalk. repo)]
-    (try
-      (let [^RevCommit c (.parseCommit walk (ObjectId/fromString sha))
-            ^PersonIdent author (.getAuthorIdent c)
-            ^PersonIdent committer (.getCommitterIdent c)
-            parents (mapv #(.name ^RevCommit %) (.getParents c))]
-        {:sha sha
-         :msg (string/trimr (.getFullMessage c))
-         :tree (.name (.getTree c))
-         :parents (seq parents)
-         :author (.getEmailAddress author)
-         :authored (.getWhen author)
-         :committer (.getEmailAddress committer)
-         :committed (.getWhen committer)})
-      (finally (.close walk)))))
