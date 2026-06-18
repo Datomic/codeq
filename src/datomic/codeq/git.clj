@@ -74,6 +74,20 @@
           acc))
       (finally (.close tw)))))
 
+(defn repo-uri
+  "[uri name] from remote.origin.url."
+  [^Repository repo]
+  (let [^String uri (.getString (.getConfig repo) "remote" "origin" "url")]
+    (assert uri "Can't find remote origin")
+    (let [noff (.lastIndexOf uri "/")
+          noff (if (pos? noff) noff (.lastIndexOf uri ":"))
+          name (subs uri (inc noff))
+          _ (assert (pos? (count name)) "Can't find remote origin")
+          name (if (.endsWith name ".git")
+                 (subs name 0 (.indexOf name "."))
+                 name)]
+      [uri name])))
+
 (defn commit-info
   "Map of commit fields for the 40-char hex sha."
   [^Repository repo ^String sha]
