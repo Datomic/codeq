@@ -1,6 +1,12 @@
 /target
+/lib
 /classes
-.cpcache/
+/checkouts
+/tmp
 pom.xml
 *.jar
 *.class
+.lein-deps-sum
+.lein-failures
+.lein-plugins
+*.tar

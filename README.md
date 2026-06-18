@@ -4,22 +4,17 @@
 
 ## Usage
 
-Clone the **codeq** repo. Then, with the [Clojure CLI](https://clojure.org/guides/install_clojure) installed:
+Clone the **codeq** repo. Then (in it) run:
 
-Build a standalone jar:
+    lein uberjar
 
-    clojure -T:build uber
+Get [Datomic Free](http://www.datomic.com/get-datomic.html)
 
-`codeq` uses [Datomic Pro](https://www.datomic.com/) (free, no license required) via the Peer API. For a quick run with no transactor, use the in-memory `datomic:mem://` storage:
+Unzip it, then start the Datomic Free transactor. Follow the instructions for [running the transactor with the free storage protocol](http://docs.datomic.com/getting-started.html)
 
     cd theGitRepoYouWantToImport
-    java -jar whereverYouPutCodeq/target/codeq.jar datomic:mem://git
 
-For development without building a jar:
-
-    clojure -M:run datomic:mem://git
-
-For persistent storage, start a Datomic Pro transactor and pass its URI (e.g. `datomic:dev://localhost:4334/git`) instead of `datomic:mem://`.
+    java -server -Xmx1g -jar whereverYouPutCodeq/target/codeq-0.1.0-SNAPSHOT-standalone.jar datomic:free://localhost:4334/git
 
 This will create a db called `git` (you can call it whatever you like) and import the commits from the local view of the repo. You should see output like:
 
@@ -43,7 +38,12 @@ The import is not too peppy, since it shells to `git` relentlessly, but it impor
 
 You can import more than one repo into the same db. You can re-import later after some more commits and they will be incrementally added.
 
-You can then (or during) connect to the same db URI with a peer. Note that the in-memory `datomic:mem://` db only lives inside the importing process — to browse a db after import, run against a persistent storage URI backed by a Datomic Pro transactor (e.g. `datomic:dev://localhost:4334/git`).
+You can then (or during) connect to the same db URI with a peer. Or, just start the [Datomic REST service](http://docs.datomic.com/rest.html) and poke around:
+
+    cd whereverYouPutDatomicFree
+    bin/rest -p 8080 free datomic:free://localhost:4334/
+
+Browse to [localhost:8080/data/](http://localhost:8080/data/). You should see the `free` storage and the `git` db within it.
 
 The [schema diagram](https://github.com/downloads/Datomic/codeq/codeq.pdf) will help you get oriented.
 

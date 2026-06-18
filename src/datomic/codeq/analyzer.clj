@@ -7,7 +7,8 @@
 ;;   You must not remove this notice, or any other, from this software.
 
 (ns datomic.codeq.analyzer
-  (:import [java.io StringReader]))
+  (:import [java.io StringReader]
+           [org.apache.commons.codec.digest DigestUtils]))
 
 (set! *warn-on-reflection* true)
 
@@ -21,9 +22,7 @@
 (defn sha
   "Returns the hex string of the sha1 of s"
   [^String s]
-  (let [bytes (.digest (java.security.MessageDigest/getInstance "SHA-1")
-                       (.getBytes s "UTF-8"))]
-    (apply str (map #(format "%02x" %) bytes))))
+  (org.apache.commons.codec.digest.DigestUtils/shaHex s))
 
 (defn ws-minify
   "Consecutive ws becomes a single space, then trim"
