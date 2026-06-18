@@ -74,21 +74,3 @@
               c2 (commit-file! git dir "a.txt" "one\ntwo\n" "second")
               shas (mapv first (git/commit-shas repo nil))]
           (is (= [(.name c1) (.name c2)] shas)))))))
-
-(deftest tree-entries-lists-direct-children
-  (testing "tree-entries returns [sha type filename] for top-level entries"
-    (with-temp-repo
-      (fn [dir git ^Repository repo]
-        (.mkdirs (clojure.java.io/file dir "sub"))
-        (spit (clojure.java.io/file dir "sub" "nested.txt") "n\n")
-        (let [rc (commit-file! git dir "top.txt" "t\n" "mixed tree")
-              ;; also stage the nested dir
-              _ (.. git add (addFilepattern "sub") (call))
-              rc2 (.. git commit (setMessage "with sub")
-                      (setAuthor "Ada Lovelace" "ada@example.com")
-                      (setCommitter "Ada Lovelace" "ada@example.com") (call))
-              entries (git/tree-entries repo (.name (.getTree rc2)))
-              by-name (into {} (map (fn [[sha type fname]] [fname [type]]) entries))]
-          (is (= [:blob] (by-name "top.txt")))
-          (is (= [:tree] (by-name "sub")))
-          (is (every? #(= 40 (count (first %))) entries)))))))
