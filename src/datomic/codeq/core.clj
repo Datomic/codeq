@@ -382,8 +382,7 @@
   [grepo conn repo-uri repo-name commits]
   ;;todo - add already existing commits to new repo if it includes them
   (println "Importing repo:" repo-uri "as:" repo-name)
-  (let [start (System/nanoTime)
-        db (d/db conn)
+  (let [db (d/db conn)
         repo
         (or (ffirst (d/q '[:find ?e :in $ ?uri :where [?e :repo/uri ?uri]] db repo-uri))
             (let [temp (d/tempid :db.part/user)
@@ -396,15 +395,13 @@
         (println "Importing commit:" (:sha commit))
         (d/transact conn (commit-tx-data grepo db repo repo-name commit))))
     (d/request-index conn)
-    (println "Import complete!"
-             (format "(%.1fs)" (/ (- (System/nanoTime) start) 1e9)))))
+    (println "Import complete!")))
 
 (def analyzers [(datomic.codeq.analyzers.clj/impl)])
 
 (defn run-analyzers
   [grepo conn]
   (println "Analyzing...")
-  (let [start (System/nanoTime)]
   (doseq [a analyzers]
     (let [aname (az/keyname a)
           exts (az/extensions a)
@@ -455,8 +452,7 @@
                                      :tx/file f
                                      :tx/analyzer aname
                                      :tx/analyzerRev arev})))))))
-    (println "Analysis complete!"
-             (format "(%.1fs)" (/ (- (System/nanoTime) start) 1e9)))))
+  (println "Analysis complete!"))
 
 (defn main [& [db-uri commit]]
   (if db-uri
