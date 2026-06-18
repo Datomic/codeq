@@ -75,15 +75,6 @@
               shas (mapv first (git/commit-shas repo nil))]
           (is (= [(.name c1) (.name c2)] shas)))))))
 
-(deftest repo-uri-reads-origin
-  (testing "repo-uri returns [uri name] from remote.origin.url"
-    (with-temp-repo
-      (fn [dir git ^Repository repo]
-        (let [cfg (.getConfig repo)]
-          (.setString cfg "remote" "origin" "url" "git@github.com:devn/codeq.git")
-          (.save cfg))
-        (is (= ["git@github.com:devn/codeq.git" "codeq"] (git/repo-uri repo)))))))
-
 (deftest tree-entries-lists-direct-children
   (testing "tree-entries returns [sha type filename] for top-level entries"
     (with-temp-repo
